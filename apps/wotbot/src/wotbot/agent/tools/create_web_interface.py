@@ -8,13 +8,20 @@ enforce. The generated code runs in an opaque-origin sandboxed iframe and can
 ONLY reach the declared Thing affordances via the bridge.
 """
 
+import asyncio
+
 import httpx
+from fastapi import HTTPException
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from wotbot.catalog.ids import decode_thing_id
+from wotbot.catalog.service import ThingCatalogQueryService
 from wotbot.clients.code_executor import CodeExecutorClient
+from wotbot.core.database import get_session_factory
 from wotbot.core.settings import Settings
 from wotbot.panels.render import wrap_panel_document
+from wotbot.panels.validate import validate_panel
 
 _settings = Settings()
 _code_executor_client = CodeExecutorClient(_settings)
@@ -61,6 +68,58 @@ def _normalize_capabilities(capabilities: list[Capability]) -> list[dict]:
             }
         )
     return normalized
+
+
+async def _thing_affordances(
+    thing_ids: list[str],
+) -> tuple[dict[str, dict[str, list[str]]], list[str]]:
+    """Affordance names per declared thing, plus the ids the registry does not have.
+
+    Only a 404 counts as missing: the registry answered and the thing is not
+    there. Any other failure (unreachable database, unexpected error) yields
+    neither, so `validate_panel` stays silent about those things rather than
+    blaming the panel for an outage.
+    """
+
+    def run() -> tuple[dict[str, dict[str, list[str]]], list[str]]:
+        found: dict[str, dict[str, list[str]]] = {}
+        missing: list[str] = []
+        session_factory = get_session_factory()
+        with session_factory() as session:
+            service = ThingCatalogQueryService(session)
+            for thing_id in thing_ids:
+                try:
+                    payload = service.get_owned_thing(decode_thing_id(thing_id))
+                except HTTPException as exc:
+                    if exc.status_code == 404:
+                        missing.append(thing_id)
+                    continue
+                document = payload.get("document")
+                if not isinstance(document, dict):
+                    continue
+                found[thing_id] = {
+                    kind: sorted((document.get(kind) or {}).keys())
+                    for kind in ("properties", "actions", "events")
+                }
+        return found, missing
+
+    try:
+        return await asyncio.to_thread(run)
+    except Exception:
+        return {}, []
+
+
+async def _check_panel(html: str, allowed: list[dict]) -> list[str]:
+    """Everything wrong with this panel that can be found without running it."""
+    thing_ids = [capability["thingId"] for capability in allowed]
+    affordances, missing = await _thing_affordances(thing_ids)
+    problems = validate_panel(html, allowed, affordances)
+    problems.extend(
+        f"No Thing with id '{thing_id}' is registered, so every call against it "
+        "fails. Find the right id with things_search."
+        for thing_id in missing
+    )
+    return problems
 
 
 @tool
@@ -118,6 +177,12 @@ async def create_web_interface(
     with wot_get_property/wot_get_action first so names and value shapes are
     correct.
 
+    The interface is checked before it is stored: each <script> must parse, every
+    literal window.wot call must be permitted by `capabilities`, and every
+    declared affordance must exist on the Thing. Anything wrong comes back as an
+    error instead of an artifact -- fix it and call this tool again with the
+    complete corrected panel.
+
     The frontend renders the interface below the tool call. Refer to it
     naturally ("the panel above") and never mention raw filenames.
     """
@@ -127,6 +192,17 @@ async def create_web_interface(
             "error": (
                 "Refusing to create an interface with no valid capabilities. "
                 "Declare at least one thing_id with allowed ops."
+            )
+        }
+
+    problems = await _check_panel(html, allowed)
+    if problems:
+        return {
+            "error": (
+                "This interface would not work as written, so it was not created:\n"
+                + "\n".join(f"- {problem}" for problem in problems)
+                + "\nFix these and call create_web_interface again with the "
+                "complete corrected panel."
             )
         }
 
