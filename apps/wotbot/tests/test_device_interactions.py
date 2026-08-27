@@ -29,7 +29,7 @@ class DeviceInteractionSummaryNodeTestCase(unittest.TestCase):
             ),
             ToolMessage(content='{"ok": true}', tool_call_id="old_call"),
             AIMessage(content="Old answer"),
-            HumanMessage(content="Compare the house data"),
+            HumanMessage(content="Compare the production lines"),
             AIMessage(
                 content="",
                 tool_calls=[
@@ -41,8 +41,8 @@ class DeviceInteractionSummaryNodeTestCase(unittest.TestCase):
                     {
                         "name": "wot_write_property",
                         "args": {
-                            "thing_id": "urn:wotbot:thing:lamp",
-                            "property_name": "brightness",
+                            "thing_id": "urn:wotbot:thing:line-3",
+                            "property_name": "targetSpeed",
                             "value": 40,
                         },
                         "id": "write_call",
@@ -56,8 +56,8 @@ class DeviceInteractionSummaryNodeTestCase(unittest.TestCase):
                         "wot_calls": [
                             {
                                 "type": "read_property",
-                                "thing_id": "urn:wotbot:thing:meter",
-                                "name": "power",
+                                "thing_id": "urn:wotbot:thing:counter",
+                                "name": "unitsProduced",
                                 "ok": True,
                             }
                         ],
@@ -78,15 +78,15 @@ class DeviceInteractionSummaryNodeTestCase(unittest.TestCase):
             summary["interactions"],
             [
                 {
-                    "affordanceName": "power",
+                    "affordanceName": "unitsProduced",
                     "ok": True,
-                    "thingId": "urn:wotbot:thing:meter",
+                    "thingId": "urn:wotbot:thing:counter",
                     "type": "read_property",
                 },
                 {
-                    "affordanceName": "brightness",
+                    "affordanceName": "targetSpeed",
                     "ok": True,
-                    "thingId": "urn:wotbot:thing:lamp",
+                    "thingId": "urn:wotbot:thing:line-3",
                     "type": "write_property",
                     "value": 40,
                 },

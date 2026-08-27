@@ -8,8 +8,8 @@ def test_compute_td_hash_ignores_transport_fields():
     thing_td = {
         "id": "urn:thing:alpha",
         "title": "Alpha Sensor",
-        "description": "Kitchen air monitor",
-        "tags": ["kitchen", "sensor"],
+        "description": "Process temperature monitor for assembly line 3",
+        "tags": ["line-3", "sensor"],
         "properties": {
             "temperature": {
                 "type": "number",
@@ -31,8 +31,8 @@ def test_extract_td_metadata_basic():
     thing_td = {
         "id": "urn:thing:alpha",
         "title": "Alpha Sensor",
-        "description": "Kitchen air monitor",
-        "tags": ["kitchen", "sensor"],
+        "description": "Process temperature monitor for assembly line 3",
+        "tags": ["line-3", "sensor"],
         "properties": {
             "temperature": {
                 "type": "number",
@@ -59,8 +59,8 @@ def test_extract_td_metadata_basic():
 
     assert meta["id"] == "urn:thing:alpha"
     assert meta["title"] == "Alpha Sensor"
-    assert meta["description"] == "Kitchen air monitor"
-    assert meta["tags"] == ["kitchen", "sensor"]
+    assert meta["description"] == "Process temperature monitor for assembly line 3"
+    assert meta["tags"] == ["line-3", "sensor"]
     assert meta["propertyNames"] == ["humidity", "temperature"]
     assert meta["actionNames"] == ["calibrate"]
     assert meta["eventNames"] == ["overheating"]

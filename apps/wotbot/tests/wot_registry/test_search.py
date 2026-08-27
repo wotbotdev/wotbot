@@ -8,7 +8,7 @@ def sample_thing(thing_id: str = "urn:thing:search-stub") -> dict[str, object]:
         "@context": "https://www.w3.org/2022/wot/td/v1.1",
         "id": thing_id,
         "title": "Alpha Sensor",
-        "description": "Kitchen air monitor",
+        "description": "Process temperature monitor for assembly line 3",
         "securityDefinitions": {
             "nosec_sc": {
                 "scheme": "nosec",
@@ -34,7 +34,7 @@ def test_thing_search_alias_endpoint_is_available(authenticated_headers):
         response = client.get(
             "/api/things/search",
             headers=authenticated_headers,
-            params={"q": "kitchen sensor", "k": 3},
+            params={"q": "line temperature monitor", "k": 3},
         )
 
     assert response.status_code == 200, response.text
@@ -42,14 +42,14 @@ def test_thing_search_alias_endpoint_is_available(authenticated_headers):
         "items": [
             {
                 "id": "urn:thing:search-stub",
-                "title": "Stub result for kitchen sensor",
+                "title": "Stub result for line temperature monitor",
                 "description": "Stubbed semantic search result",
                 "tags": ["stub"],
                 "score": 1.0,
                 "summary": "Matched with k=3",
             }
         ],
-        "query": "kitchen sensor",
+        "query": "line temperature monitor",
     }
 
 
@@ -58,7 +58,7 @@ def test_legacy_search_endpoint_is_removed(authenticated_headers):
         response = client.get(
             "/api/search",
             headers=authenticated_headers,
-            params={"q": "kitchen sensor", "k": 3},
+            params={"q": "line temperature monitor", "k": 3},
         )
 
     assert response.status_code == 404, response.text
@@ -94,7 +94,7 @@ def test_index_status_endpoint_returns_semantic_index_details(authenticated_head
         "prompt_version": "v-test",
         "td_hash_match": True,
         "summary": "Stubbed semantic summary",
-        "location_candidates": ["Kitchen"],
+        "location_candidates": ["Line 3"],
         "property_names": ["temperature"],
         "action_names": ["toggle"],
         "event_names": ["overheated"],
@@ -133,7 +133,7 @@ def test_thing_index_status_alias_endpoint_returns_semantic_index_details(
         "prompt_version": "v-test",
         "td_hash_match": True,
         "summary": "Stubbed semantic summary",
-        "location_candidates": ["Kitchen"],
+        "location_candidates": ["Line 3"],
         "property_names": ["temperature"],
         "action_names": ["toggle"],
         "event_names": ["overheated"],

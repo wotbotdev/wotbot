@@ -78,7 +78,7 @@ function ChatStream({
         error={runError}
         isRetrying={isRecovering}
         onRetry={() => void retryRecovery()}
-        placeholder="Ask about your devices, routines, or home..."
+        placeholder="Ask about your Things, data, or automations..."
         rerunConfirmation={rerunConfirmation}
       />
     </AssistantRuntimeProvider>

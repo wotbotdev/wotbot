@@ -42,7 +42,7 @@ class StubSearchService:
             "prompt_version": "v-test",
             "td_hash_match": bool(document_hash),
             "summary": "Stubbed semantic summary",
-            "location_candidates": ["Kitchen"],
+            "location_candidates": ["Line 3"],
             "property_names": ["temperature"],
             "action_names": ["toggle"],
             "event_names": ["overheated"],

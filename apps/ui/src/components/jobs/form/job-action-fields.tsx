@@ -32,7 +32,7 @@ function PromptField({
         rows={9}
         value={prompt}
         onChange={(event) => onPromptChange(event.target.value)}
-        placeholder="Summarize the latest occupancy and temperature changes."
+        placeholder="Summarize the latest shipment delays and exception alerts."
       />
     </div>
   );

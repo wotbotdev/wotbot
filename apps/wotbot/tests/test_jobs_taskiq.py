@@ -83,7 +83,7 @@ def update_job_request(**values):
 def _job(**overrides) -> Job:
     now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
     action_kind = overrides.pop("action_kind", JobActionKind.PROMPT)
-    prompt = overrides.pop("prompt", "Check the house")
+    prompt = overrides.pop("prompt", "Check the production queue")
     analysis_code = overrides.pop("analysis_code", "print('ok')")
     output_kind = overrides.pop("output_kind", JobOutputKind.NARRATIVE)
     trigger_kind = overrides.pop("trigger_kind", JobTriggerKind.TIME)
@@ -523,11 +523,11 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
             "messages": [
                 HumanMessage(content="first run"),
                 ToolMessage(
-                    content='{"question": "Which room?"}',
+                    content='{"question": "Which production line?"}',
                     name="ask_job_user",
                     tool_call_id="call-1",
                 ),
-                HumanMessage(content="kitchen"),
+                HumanMessage(content="line 3"),
                 AIMessage(content="done"),
             ]
         }
@@ -540,8 +540,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
                 HumanMessage(content="first run"),
                 ToolMessage(
                     content=(
-                        '{"status": "input_received", "question": "Which room?", '
-                        '"answer": "kitchen"}'
+                        '{"status": "input_received", "question": "Which production line?", '
+                        '"answer": "line 3"}'
                     ),
                     name="ask_job_user",
                     tool_call_id="call-1",
@@ -556,8 +556,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
         result = {
             "messages": [
                 HumanMessage(content="first run"),
-                AIMessage(content="Which room?"),
-                HumanMessage(content="kitchen"),
+                AIMessage(content="Which production line?"),
+                HumanMessage(content="line 3"),
             ]
         }
 
@@ -812,7 +812,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
             "job-1",
             {
                 "source": "user_reply",
-                "message": "kitchen",
+                "message": "line 3",
                 "client_reply_id": "reply-1",
                 "previous_run_id": "run-1",
             },
@@ -935,7 +935,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
             _job(
                 action_kind=JobActionKind.ANALYSIS,
                 prompt=None,
-                analysis_code="report('Living room averaged 21 C')",
+                analysis_code="report('Line 3 processed 124 units')",
             )
         )
         publisher = _FakePublisher()
@@ -943,7 +943,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
         code_executor.execute.return_value = {
             "stdout": '{"observed_value": 21}\n',
             "plotly": ["chart-1.json"],
-            "reports": ["Living room averaged 21 C"],
+            "reports": ["Line 3 processed 124 units"],
         }
         executor = JobExecutor(
             Settings(),
@@ -956,7 +956,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
         result = await executor.run_job("job-1", {"source": "manual"})
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["assistant"], "Living room averaged 21 C")
+        self.assertEqual(result["assistant"], "Line 3 processed 124 units")
 
     async def test_analysis_job_without_output_reports_finished(self) -> None:
         repo = _FakeRepo(
@@ -1532,7 +1532,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
                 last_run_id="run-1",
                 active_run_id="run-1",
                 last_run_status=JobRunStatus.WAITING_FOR_INPUT,
-                waiting_question="Which room?",
+                waiting_question="Which production line?",
             )
         )
         service = JobService(Settings(), repo=repo)
@@ -1548,7 +1548,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
             "wotbot.jobs.service.run_job_task.kiq",
             AsyncMock(return_value=task),
         ) as enqueue:
-            result = await service.reply_to_waiting_thread("job:job-1", "kitchen")
+            result = await service.reply_to_waiting_thread("job:job-1", "line 3")
 
         self.assertEqual(result, {"ok": True, "assistant": "continued"})
         self.assertEqual(repo.loaded_by_thread, ["job:job-1"])
@@ -1556,7 +1556,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
             job_id="job-1",
             trigger={
                 "source": "user_reply",
-                "message": "kitchen",
+                "message": "line 3",
                 "client_reply_id": None,
                 "previous_run_id": "run-1",
             },
@@ -1572,7 +1572,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
             status=JobRunStatus.SUCCEEDED,
             trigger_payload={
                 "source": "user_reply",
-                "replies": [{"client_reply_id": "reply-1", "message": "kitchen"}],
+                "replies": [{"client_reply_id": "reply-1", "message": "line 3"}],
             },
             result={"ok": True, "assistant": "continued"},
             response_text="continued",
@@ -1589,7 +1589,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
         with patch("wotbot.jobs.service.run_job_task.kiq", AsyncMock()) as enqueue:
             result = await service.reply_to_job(
                 "job-1",
-                "kitchen",
+                "line 3",
                 client_reply_id="reply-1",
             )
 
@@ -1603,7 +1603,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
         service = JobService(Settings(), repo=repo)
 
         with patch("wotbot.jobs.service.run_job_task.kiq", AsyncMock()) as enqueue:
-            result = await service.reply_to_waiting_thread("job:job-1", "kitchen")
+            result = await service.reply_to_waiting_thread("job:job-1", "line 3")
 
         self.assertIsNone(result)
         enqueue.assert_not_awaited()

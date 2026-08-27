@@ -5,7 +5,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-SUMMARY_PROMPT_VERSION = "v6"
+SUMMARY_PROMPT_VERSION = "v7"
 
 SYSTEM_PROMPT = (
     "You create concise, search-friendly summaries for Web of Things (WoT) Thing Descriptions."
@@ -17,10 +17,11 @@ search-friendly plain-text summary.
 Rules:
 1. Preserve exact WoT terms: property, action, and event names must appear verbatim.
 2. Do not invent capabilities, locations, or descriptions that are not in the TD.
-3. Infer likely installation locations from the title, description, tags, or property names
-   (e.g. "kitchen temperature" -> kitchen). State them as candidates, not facts.
+3. Infer a likely deployment context or location only when the title, description, tags, or
+   affordance names support it (e.g. "line 3 vibration monitor" -> line 3). State it as a
+   candidate, not a fact, and do not assume every Thing has a physical installation.
 4. Include alternative search phrasings a user might type
-   (e.g. "turn on the light", "check humidity").
+   (e.g. "pause the conveyor", "check the API quota").
 5. Keep the output plain text with short labeled sections. No markdown.
 
 Thing Description JSON:

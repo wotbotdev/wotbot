@@ -3,7 +3,11 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.embeddings import Embeddings
 
-from wotbot.thing_indexer.prompting import _extract_message_text
+from wotbot.thing_indexer.prompting import (
+    PROMPT_TEMPLATE,
+    SUMMARY_PROMPT_VERSION,
+    _extract_message_text,
+)
 from wotbot.search.vector_store import (
     SearchIndexDocument,
     SearchIndexMatch,
@@ -15,7 +19,7 @@ class FakeEmbeddings(Embeddings):
     def _embed(self, text: str) -> list[float]:
         lowered = text.lower()
         return [
-            float(lowered.count("kitchen")),
+            float(lowered.count("line")),
             float(lowered.count("temperature") + lowered.count("temp")),
             float(lowered.count("humidity")),
             float(len(lowered.split())),
@@ -76,6 +80,13 @@ def test_extract_message_text_reads_block_payload():
     assert _extract_message_text(content) == "First block\nSecond block"
 
 
+def test_summary_prompt_does_not_assume_a_home_or_physical_installation():
+    assert SUMMARY_PROMPT_VERSION == "v7"
+    assert "do not assume every Thing has a physical installation" in PROMPT_TEMPLATE
+    assert "kitchen" not in PROMPT_TEMPLATE.casefold()
+    assert "home" not in PROMPT_TEMPLATE.casefold()
+
+
 @pytest.mark.anyio
 async def test_pgvector_search_vector_store_round_trip():
     store = SearchVectorStore(
@@ -89,7 +100,7 @@ async def test_pgvector_search_vector_store_round_trip():
             (
                 thing_id,
                 SearchIndexDocument(
-                    page_content="Kitchen air monitor with temperature summary",
+                    page_content="Line 3 process monitor with temperature summary",
                     metadata={"id": thing_id, "title": "Alpha"},
                 ),
             ),
@@ -100,14 +111,14 @@ async def test_pgvector_search_vector_store_round_trip():
     assert device_chunk is not None
     assert device_chunk.metadata["title"] == "Alpha"
 
-    matches = await store.query_similar("kitchen temperature", limit=3)
+    matches = await store.query_similar("line temperature", limit=3)
     assert matches
     assert matches[0].metadata["id"] == thing_id
 
     await store.delete_thing_chunks(thing_id)
 
     assert await store.get_device_chunk(thing_id) is None
-    assert await store.query_similar("kitchen temperature", limit=3) == []
+    assert await store.query_similar("line temperature", limit=3) == []
 
 
 @pytest.mark.anyio

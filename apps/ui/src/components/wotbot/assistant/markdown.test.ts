@@ -15,7 +15,7 @@ test('renders GitHub-flavored tables, task lists, and strikethrough', () => {
       [
         '| Device | State |',
         '| --- | --- |',
-        '| Lamp | On |',
+        '| Conveyor | Running |',
         '',
         '- [x] Checked',
         '',

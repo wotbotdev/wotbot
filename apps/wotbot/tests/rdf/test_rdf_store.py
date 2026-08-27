@@ -59,8 +59,8 @@ def anyio_backend():
 
 def test_thing_graph_iri_encodes_thing_id():
     assert (
-        thing_graph_iri("urn:thing:kitchen sensor")
-        == f"{RDF_THING_GRAPH_PREFIX}urn%3Athing%3Akitchen%20sensor"
+        thing_graph_iri("urn:thing:line 3 sensor")
+        == f"{RDF_THING_GRAPH_PREFIX}urn%3Athing%3Aline%203%20sensor"
     )
 
 

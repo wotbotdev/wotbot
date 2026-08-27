@@ -33,8 +33,8 @@ def sample_thing(thing_id: str = "urn:thing:alpha") -> dict[str, object]:
         "@context": "https://www.w3.org/2022/wot/td/v1.1",
         "id": thing_id,
         "title": "Alpha Sensor",
-        "description": "Kitchen air monitor",
-        "tags": ["kitchen", "sensor"],
+        "description": "Process temperature monitor for assembly line 3",
+        "tags": ["line-3", "sensor"],
         "securityDefinitions": {
             "nosec_sc": {
                 "scheme": "nosec",
@@ -110,7 +110,7 @@ def test_api_things_crud_and_events(authenticated_headers):
         assert publisher.events[-1]["eventType"] == "create"
 
         list_response = client.get(
-            "/api/things?q=kitchen",
+            "/api/things?q=line-3",
             headers=authenticated_headers,
         )
         assert list_response.status_code == 200
@@ -125,7 +125,7 @@ def test_api_things_crud_and_events(authenticated_headers):
         assert get_response.json()["document"]["properties"]["temperature"]["type"] == "number"
 
         updated = sample_thing()
-        updated["description"] = "Updated kitchen air monitor"
+        updated["description"] = "Updated process temperature monitor"
         update_response = client.put(
             f"/api/things/{thing['id']}",
             headers={
@@ -136,7 +136,7 @@ def test_api_things_crud_and_events(authenticated_headers):
         )
         assert update_response.status_code == 200
         flush_outbox(client, publisher)
-        assert update_response.json()["description"] == "Updated kitchen air monitor"
+        assert update_response.json()["description"] == "Updated process temperature monitor"
         assert publisher.events[-1]["eventType"] == "update"
 
         delete_response = client.delete(

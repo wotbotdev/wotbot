@@ -32,7 +32,7 @@ from wotbot.jobs.models import (
 def _job(**overrides) -> Job:
     now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
     action_kind = overrides.pop("action_kind", JobActionKind.PROMPT)
-    prompt = overrides.pop("prompt", "Check the house")
+    prompt = overrides.pop("prompt", "Check the production queue")
     analysis_code = overrides.pop("analysis_code", "print('ok')")
     output_kind = overrides.pop("output_kind", JobOutputKind.NARRATIVE)
     trigger_kind = overrides.pop("trigger_kind", JobTriggerKind.TIME)
@@ -147,10 +147,10 @@ class JobGraphResultsTestCase(unittest.TestCase):
     def test_waiting_question_prefers_interrupt_payload(self) -> None:
         result = {
             "messages": [AIMessage(content="", tool_calls=[])],
-            "__interrupt__": [{"value": {"question": "Which room?"}}],
+            "__interrupt__": [{"value": {"question": "Which production line?"}}],
         }
 
-        self.assertEqual(waiting_question_from_graph_result(result), "Which room?")
+        self.assertEqual(waiting_question_from_graph_result(result), "Which production line?")
 
     def test_parse_graph_result_collects_policy_inputs(self) -> None:
         result = {
@@ -194,8 +194,8 @@ class JobGraphResultsTestCase(unittest.TestCase):
                 HumanMessage(content="start"),
                 ToolMessage(
                     content=(
-                        '{"status": "input_received", "question": "Which room?", '
-                        '"answer": "kitchen"}'
+                        '{"status": "input_received", "question": "Which production line?", '
+                        '"answer": "line 3"}'
                     ),
                     name="ask_job_user",
                     tool_call_id="call-1",

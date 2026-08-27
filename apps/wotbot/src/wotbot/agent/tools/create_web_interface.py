@@ -130,9 +130,9 @@ async def create_web_interface(
 ) -> dict:
     """Create an interactive HTML/JS mini-interface (control panel or dashboard).
 
-    Use this when the user wants a custom UI to monitor or control devices,
+    Use this when the user wants a custom UI to monitor or operate Things,
     rather than a static chart. Write plain HTML for `html` (body markup plus a
-    <script> with your own JS). Drive devices through the injected `window.wot`
+    <script> with your own JS). Drive Things through the injected `window.wot`
     client:
 
       await wot.readProperty(thingId, name, { uriVariables })
@@ -147,7 +147,7 @@ async def create_web_interface(
     run_code's wot.read_property. Do NOT read transport wrapper fields such as
     result, payload, completed_result, or payload.data in panel JavaScript.
     Use value.value, value.unit, or other nested fields only when the inspected
-    property/action schema says the decoded device value itself has those fields.
+    property/action schema says the decoded Thing value itself has those fields.
     Binary payloads resolve to `{ kind: "binary", contentType, bodyBase64,
     sizeBytes }`. Use wot.isBinaryPayload(value), wot.binaryToBytes(value),
     wot.binaryToBlob(value), or wot.binaryToObjectUrl(value) for binary media
@@ -163,8 +163,8 @@ async def create_web_interface(
     alongside its JS (Leaflet, for one) works. Maps work too: tiles may come
     from tile.openstreetmap.org. Any other image must be a `data:` URI — an
     arbitrary image URL is blocked by CSP because it would be a way to leak
-    device data off the page. You must NOT use fetch/XHR/WebSocket/sendBeacon —
-    all network egress is blocked by CSP; the only way to reach devices is
+    Thing data off the page. You must NOT use fetch/XHR/WebSocket/sendBeacon —
+    all network egress is blocked by CSP; the only way to reach registered Things is
     `window.wot`. Inline your own CSS/JS.
 
     WebGL and WebXR both work in the panel frame: `navigator.xr` is available

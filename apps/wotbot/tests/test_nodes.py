@@ -122,12 +122,12 @@ class NodeMessageSanitizationTestCase(unittest.TestCase):
 
     def test_make_router_messages_filters_out_tool_turns(self) -> None:
         messages = [
-            HumanMessage(content="Show me house 5 power"),
+            HumanMessage(content="Show me line 5 throughput"),
             AIMessage(
                 content="", tool_calls=[{"name": "things_search", "args": {}, "id": "call_1"}]
             ),
-            ToolMessage(content='[{"id":"meter-05"}]', tool_call_id="call_1"),
-            AIMessage(content="I found the smart meter."),
+            ToolMessage(content='[{"id":"line-counter-05"}]', tool_call_id="call_1"),
+            AIMessage(content="I found the production counter."),
             HumanMessage(content="Now break it down with all matching analysis services."),
         ]
 
