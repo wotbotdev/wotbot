@@ -444,6 +444,22 @@ class EdcV3Provider(DiscoveryProvider):
             else None
         )
 
+    def _contract_request(
+        self,
+        source: SourceDefinition,
+        dataset: dict[str, Any],
+        policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build a negotiation request for this connector distribution."""
+
+        del dataset
+        return {
+            "@context": JSONLD_CONTEXT,
+            "@type": "ContractRequest",
+            **self._party(source),
+            "policy": policy,
+        }
+
     async def acquire(
         self,
         source: SourceDefinition,
@@ -467,12 +483,7 @@ class EdcV3Provider(DiscoveryProvider):
             f"{source.get('management_url')}/v3/contractnegotiations",
             source=source,
             public_http=public_http,
-            body={
-                "@context": JSONLD_CONTEXT,
-                "@type": "ContractRequest",
-                **self._party(source),
-                "policy": policy,
-            },
+            body=self._contract_request(source, dataset, policy),
         )
         negotiation_id = response_id(negotiation, "id")
         negotiated = await self._poll(

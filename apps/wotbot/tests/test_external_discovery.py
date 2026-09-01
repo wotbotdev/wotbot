@@ -864,9 +864,16 @@ class ProviderTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("wotbot:source", json.dumps(document))
 
     def test_provider_schemas_and_credential_headers_remain_secret_free(self) -> None:
-        self.assertEqual(set(PROVIDERS), {"udata", "dcat", "toolhive", "edc-v3", "openapi"})
+        self.assertEqual(
+            set(PROVIDERS),
+            {"udata", "dcat", "toolhive", "edc-v3", "tx-bootstrap", "openapi"},
+        )
         schema = PROVIDERS["edc-v3"].registration_schema()
         self.assertEqual(schema["default_security_scheme"], "apikey")
+        self.assertEqual(
+            PROVIDERS["tx-bootstrap"].registration_schema()["default_security_scheme"],
+            "bearer",
+        )
         self.assertNotIn("secret", json.dumps(schema).casefold())
         source = SourceDefinition(
             id="source",

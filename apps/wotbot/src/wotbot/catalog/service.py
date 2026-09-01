@@ -267,7 +267,7 @@ def _validate_protected_resource_update(
         )
     current_forms = _interaction_forms(current)
     replacement_forms = _interaction_forms(replacement)
-    if provider in {"openapi", "edc-v3"}:
+    if provider in {"openapi", "edc-v3", "tx-bootstrap"}:
         current_generated = _provider_generated_actions(current, provider)
         if _provider_generated_actions(replacement, provider) != current_generated:
             raise HTTPException(

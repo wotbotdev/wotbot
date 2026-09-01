@@ -74,6 +74,7 @@ class ProviderConfigSpec:
     text_defaults: tuple[tuple[str, str], ...] = ()
     float_defaults: tuple[tuple[str, float], ...] = ()
     requires_secret: bool = False
+    default_security_scheme: str = ""
     title: str = ""
 
 

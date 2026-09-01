@@ -71,6 +71,13 @@ class DiscoveryProvider(ABC):
 
         return self.name
 
+    @property
+    def default_security_scheme(self) -> str:
+        configured = self.config.default_security_scheme.strip().lower()
+        if configured:
+            return configured
+        return "apikey" if self.config.requires_secret else "nosec"
+
     def merge_refresh(
         self,
         current_document: dict[str, Any],
@@ -131,11 +138,11 @@ class DiscoveryProvider(ABC):
             normalized[field] = value
         for field, default in self.config.text_defaults:
             normalized[field] = str(normalized.get(field) or default).strip()
-        for field, default in self.config.float_defaults:
-            value = float(normalized.get(field) or default)
-            if value <= 0:
+        for field, float_default in self.config.float_defaults:
+            float_value = float(normalized.get(field) or float_default)
+            if float_value <= 0:
                 raise ValueError(f"Provider requires a positive '{field}'")
-            normalized[field] = value
+            normalized[field] = float_value
         return normalized
 
     def external_identity(self, config: dict[str, Any]) -> str:
@@ -190,11 +197,11 @@ class DiscoveryProvider(ABC):
             properties[field] = {"type": "string", "format": "uri"}
         for field, default in self.config.text_defaults:
             properties[field] = {"type": "string", "default": default}
-        for field, default in self.config.float_defaults:
+        for field, float_default in self.config.float_defaults:
             properties[field] = {
                 "type": "number",
                 "exclusiveMinimum": 0,
-                "default": default,
+                "default": float_default,
             }
         return {
             "provider": self.name,
@@ -206,7 +213,7 @@ class DiscoveryProvider(ABC):
                 "required": sorted(self.config.url_fields),
                 "additionalProperties": False,
             },
-            "default_security_scheme": "apikey" if self.config.requires_secret else "nosec",
+            "default_security_scheme": self.default_security_scheme,
             "security_schemes": ["nosec", "apikey", "bearer", "basic", "oauth2"],
         }
 
