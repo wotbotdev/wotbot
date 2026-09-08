@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import StructuredTool, tool
 from langgraph.types import interrupt
 from pydantic import BaseModel, ConfigDict, Field
 
 from wotbot.agent.tools._config import thread_id_from_config
+from wotbot.agent.tools.contracts import ContractTool, tool
 from wotbot.core.config import get_settings
 from wotbot.discovery import DiscoveryService
 from wotbot.discovery.errors import CredentialChallengeError
@@ -36,16 +36,11 @@ class RegisterExternalSourceInput(BaseModel):
     security_scheme: str | None = None
 
 
-class _AliasedArgsStructuredTool(StructuredTool):
-    @property
-    def tool_call_schema(self) -> Any:
-        """Preserve Pydantic aliases that LangChain's subset model otherwise drops."""
-
-        return self.args_schema
-
-
 @tool
-async def sources_search(query: str = "", limit: int = 10) -> dict[str, Any]:
+async def sources_search(
+    query: Annotated[str, Field(max_length=500)] = "",
+    limit: Annotated[int, Field(ge=1, le=25)] = 10,
+) -> dict[str, Any]:
     """Find registered external sources by their safe metadata.
 
     Results include stable source ids and credential status, but never source
@@ -58,10 +53,15 @@ async def sources_search(query: str = "", limit: int = 10) -> dict[str, Any]:
 async def discover_external(
     source_id: str,
     config: RunnableConfig,
-    query: str = "",
-    limit: int = 10,
+    query: Annotated[str, Field(max_length=500)] = "",
+    limit: Annotated[int, Field(ge=1, le=25)] = 10,
 ) -> dict[str, Any]:
-    """Search or browse exactly one registered external source for resource candidates."""
+    """Search one source_id returned by sources_search; empty query browses it.
+
+    Select a returned candidate with onboard_candidate. Candidate IDs expire and
+    belong to this conversation; rediscover expired ones. Source failures are
+    not empty results. Credential challenges use the secure UI.
+    """
     service = DiscoveryService(get_settings())
     try:
         return await service.discover(
@@ -163,7 +163,7 @@ def _register_external_source(
     }
 
 
-register_external_source = _AliasedArgsStructuredTool.from_function(
+register_external_source = ContractTool.from_function(
     func=_register_external_source,
     name="register_external_source",
     args_schema=RegisterExternalSourceInput,

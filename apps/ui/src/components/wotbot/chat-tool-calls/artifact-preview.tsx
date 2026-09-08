@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { getPanelOrigin } from '@/lib/panel-origin';
 
 import { type RunCodeArtifact } from '../chat-tool-call-model';
+import { FileArtifactCard } from './file-artifact-card';
 
 const PlotlyChart = memo(function PlotlyChart({
   className,
@@ -39,6 +40,9 @@ export function ArtifactPreview({
   fullscreen?: boolean;
   fill?: boolean;
 }) {
+  if (artifact.kind === 'file') {
+    return <FileArtifactCard artifact={artifact} />;
+  }
   if (artifact.kind === 'image') {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- generated code artifacts are proxied files and do not benefit from Next image optimization

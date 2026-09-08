@@ -2,10 +2,14 @@ import contextlib
 import io
 import unittest
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+from wotbot.clients.code_executor import CodeExecutionUncertainError
 from wotbot.virtual_things.handler import (
     RESULT_PREFIX,
     HandlerContext,
+    VirtualThingHandlerError,
+    VirtualThingHandlerRunner,
     decode_result_envelope,
     handler_wrapper,
 )
@@ -131,6 +135,45 @@ class VirtualThingGuardedWotTestCase(unittest.TestCase):
 
         with self.assertRaises(PermissionError):
             _run(code, _fake_wot())
+
+
+class VirtualThingExecutionStatusTestCase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.binding = SimpleNamespace(
+            id="binding",
+            thing_id="virtual:thing",
+            affordance_type="property",
+            affordance_name="value",
+            handler_code="def handle(input, state, context): return 1",
+            capabilities=[],
+            config={},
+            timeout_seconds=30,
+        )
+
+    async def test_failed_execution_uses_error_summary_when_stdout_is_truncated(self) -> None:
+        executor = AsyncMock()
+        executor.execute.return_value = {
+            "ok": False,
+            "error": "ValueError: missing source data",
+            "stdout": "debug output ... truncated",
+        }
+        with self.assertRaisesRegex(VirtualThingHandlerError, "ValueError: missing source data"):
+            await VirtualThingHandlerRunner(executor).run_handler(
+                self.binding,
+                input_value=None,
+                state={},
+            )
+
+    async def test_uncertain_execution_preserves_recovery_guidance(self) -> None:
+        executor = AsyncMock()
+        executor.execute.side_effect = CodeExecutionUncertainError()
+        with self.assertRaisesRegex(VirtualThingHandlerError, "may already have applied"):
+            await VirtualThingHandlerRunner(executor).run_handler(
+                self.binding,
+                input_value=None,
+                state={},
+            )
+        executor.execute.assert_awaited_once()
 
 
 class VirtualThingResultChannelTestCase(unittest.TestCase):

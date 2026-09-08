@@ -1,4 +1,5 @@
 import {
+  artifactKey,
   normalizeRunCodeResult,
   type RunCodeArtifact,
 } from '@/components/wotbot/chat-tool-call-model';
@@ -54,7 +55,7 @@ export function latestTurnArtifacts(
 
     const runCodeResult = normalizeRunCodeResult(message.content);
     for (const artifact of runCodeResult.artifacts ?? []) {
-      const key = `${artifact.kind}:${artifact.filename}`;
+      const key = artifactKey(artifact);
       if (seen.has(key)) {
         continue;
       }

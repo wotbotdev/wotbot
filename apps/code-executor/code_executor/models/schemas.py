@@ -25,9 +25,12 @@ class StoredRecord(BaseModel):
 
 
 class ExecuteResponse(BaseModel):
+    ok: bool
+    error: str | None = None
     stdout: str
     images: list[str]
     plotly: list[str]
+    files: list[dict[str, Any]] = Field(default_factory=list)
     wot_calls: list[WotCall] = Field(default_factory=list)
     records: list[StoredRecord] = Field(default_factory=list)
     reports: list[str] = Field(default_factory=list)

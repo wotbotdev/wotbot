@@ -12,8 +12,10 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import InjectedToolCallId, tool
+from langchain_core.tools import InjectedToolCallId
 from langgraph.types import Command
+
+from wotbot.agent.tools.contracts import tool
 
 # Intents an action branch may hand off to. Mirrors the dispatch target map in
 # ``builder.build_graph``. ``respond``/chat is intentionally excluded.

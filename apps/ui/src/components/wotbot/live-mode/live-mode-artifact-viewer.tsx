@@ -1,4 +1,5 @@
 import { ArtifactPreview } from '@/components/wotbot/chat-tool-call-cards';
+import { artifactKey } from '@/components/wotbot/chat-tool-call-model';
 import type { LiveModeArtifact } from '@/components/wotbot/assistant/artifacts';
 import { WebInterfaceArtifactView } from '@/components/wotbot/chat-tool-calls/web-interface-card';
 
@@ -29,7 +30,7 @@ export function LiveModeArtifactViewer({
           {artifacts.map((artifact) => (
             <div
               className="min-h-0 overflow-hidden rounded-xl border border-border bg-background/70 p-2 shadow-sm"
-              key={`${artifact.kind}:${artifact.filename}`}
+              key={artifactKey(artifact)}
             >
               <LiveModeArtifactPreview artifact={artifact} fill />
             </div>

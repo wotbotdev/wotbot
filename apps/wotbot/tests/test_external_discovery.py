@@ -330,7 +330,7 @@ class AgentToolTestCase(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_registration_tool_exposes_config_without_runnable_config_collision(self) -> None:
-        schema = register_external_source.tool_call_schema.model_json_schema()
+        schema = register_external_source.tool_call_schema
         self.assertIn("config", schema["properties"])
         self.assertNotIn("source_config", schema["properties"])
 

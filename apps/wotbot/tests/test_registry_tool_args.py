@@ -21,7 +21,7 @@ class RegistryToolArgsTestCase(unittest.TestCase):
         self.assertNotIn("intent", schema["properties"])
         self.assertNotIn("endpoint_id", schema["properties"])
 
-    def test_things_search_clamps_out_of_range_k(self) -> None:
+    def test_things_search_rejects_out_of_range_k_before_searching(self) -> None:
         class FakeSearchService:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, int]] = []
@@ -36,9 +36,9 @@ class RegistryToolArgsTestCase(unittest.TestCase):
         high = asyncio.run(things_search.ainvoke({"query": "temperature", "k": 50}))
         low = asyncio.run(things_search.ainvoke({"query": "temperature", "k": 0}))
 
-        self.assertEqual(high["k"], 20)
-        self.assertEqual(low["k"], 1)
-        self.assertEqual(service.calls, [("temperature", 20), ("temperature", 1)])
+        self.assertIn("no operation ran", high)
+        self.assertIn("no operation ran", low)
+        self.assertEqual(service.calls, [])
 
     def test_things_search_returns_tool_error_for_empty_query(self) -> None:
         response = asyncio.run(things_search.ainvoke({"query": "   ", "k": 5}))
@@ -48,7 +48,7 @@ class RegistryToolArgsTestCase(unittest.TestCase):
             {"error": "query must not be empty", "items": [], "query": ""},
         )
 
-    def test_things_sparql_runs_local_query_and_clamps_limit(self) -> None:
+    def test_things_sparql_runs_local_query_at_limit_boundary(self) -> None:
         calls = []
 
         class FakeRdfClient:
@@ -61,7 +61,7 @@ class RegistryToolArgsTestCase(unittest.TestCase):
             return_value=FakeRdfClient(),
         ):
             response = asyncio.run(
-                things_sparql.ainvoke({"query": "  SELECT * WHERE { ?s ?p ?o }  ", "limit": 999})
+                things_sparql.ainvoke({"query": "  SELECT * WHERE { ?s ?p ?o }  ", "limit": 500})
             )
 
         self.assertEqual(response["type"], "select")

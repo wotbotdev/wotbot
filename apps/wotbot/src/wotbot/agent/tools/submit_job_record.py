@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
 
+from wotbot.agent.tools.contracts import tool
 from wotbot.jobs.records import VirtualRecordStore
 
 

@@ -8,7 +8,7 @@ import time
 import traceback
 from typing import Any
 
-from code_executor.constants import RESULT_POLL_INTERVAL_SECONDS
+from code_executor.constants import MAX_STDOUT_CHARS, RESULT_POLL_INTERVAL_SECONDS
 from code_executor.execution_environment import ExecutionEnvironment
 from code_executor.processes import terminate_pid
 
@@ -21,22 +21,25 @@ def worker_loop(
     runtime_url: str,
     runtime_api_token: str,
     execution_timeout_seconds: int,
+    file_settings: dict[str, Any] | None = None,
 ) -> None:
     """The entry point for the isolated background process."""
     environment = ExecutionEnvironment(
         artifacts_dir,
         runtime_url,
         runtime_api_token,
+        file_settings,
     )
 
     while True:
         try:
-            code = conn.recv()
-            if code is None:
+            message = conn.recv()
+            if message is None:
                 break
+            code, execution_id = message
 
             if not hasattr(os, "fork"):
-                result = environment.execute_code(code)
+                result = environment.execute_code(code, execution_id)
                 conn.send(_session_response(result))
                 continue
 
@@ -44,6 +47,7 @@ def worker_loop(
                 environment,
                 code,
                 execution_timeout_seconds,
+                execution_id,
             )
             if outcome is _PROMOTED_CURRENT_PROCESS:
                 continue
@@ -63,13 +67,14 @@ def _execute_with_rollback(
     environment: ExecutionEnvironment,
     code: str,
     execution_timeout_seconds: int,
+    execution_id: str,
 ) -> tuple[dict[str, Any], bool] | object:
     result_reader, result_writer = mp.Pipe(duplex=False)
     child_pid = os.fork()
 
     if child_pid == 0:
         result_reader.close()
-        result = _run_child_code(environment, code, result_writer)
+        result = _run_child_code(environment, code, result_writer, execution_id)
         result_writer.close()
 
         if result.get("ok"):
@@ -91,6 +96,7 @@ def _run_child_code(
     environment: ExecutionEnvironment,
     code: str,
     result_writer: mp.connection.Connection,
+    execution_id: str | None = None,
 ) -> dict[str, Any]:
     result = {
         "ok": False,
@@ -99,14 +105,18 @@ def _run_child_code(
         "plotly": [],
     }
     try:
-        result = environment.execute_code(code)
+        result = environment.execute_code(code, execution_id)
         result_writer.send(result)
-    except BaseException:
+    except BaseException as exc:
         result = {
             "ok": False,
-            "stdout": traceback.format_exc(),
+            "error": "".join(traceback.format_exception_only(type(exc), exc)).strip()[
+                :MAX_STDOUT_CHARS
+            ],
+            "stdout": environment._trim_stdout(traceback.format_exc()),
             "images": [],
             "plotly": [],
+            "wot_calls": environment.wot_calls.copy(),
         }
         try:
             result_writer.send(result)
@@ -177,7 +187,7 @@ def _receive_child_result(
         os.waitpid(child_pid, 0)
     except ChildProcessError:
         pass
-    return _failed_execution_response(child_result.get("stdout", "")), False
+    return _session_response(child_result), False
 
 
 def _handle_exited_child(
@@ -189,7 +199,7 @@ def _handle_exited_child(
         except EOFError:
             child_result = None
         if child_result and not child_result.get("ok"):
-            return _failed_execution_response(child_result.get("stdout", "")), False
+            return _session_response(child_result), False
 
     return (
         {
@@ -204,18 +214,13 @@ def _handle_exited_child(
 
 def _session_response(result: dict[str, Any]) -> dict[str, Any]:
     return {
+        "ok": result["ok"],
+        "error": result.get("error"),
         "stdout": result["stdout"],
-        "images": result["images"],
-        "plotly": result["plotly"],
+        "images": result["images"] if result["ok"] else [],
+        "plotly": result["plotly"] if result["ok"] else [],
+        "files": result.get("files", []) if result["ok"] else [],
         "wot_calls": result.get("wot_calls", []),
-        "records": result.get("records", []),
-        "reports": result.get("reports", []),
-    }
-
-
-def _failed_execution_response(stdout: str) -> dict[str, Any]:
-    return {
-        "stdout": stdout,
-        "images": [],
-        "plotly": [],
+        "records": result.get("records", []) if result["ok"] else [],
+        "reports": result.get("reports", []) if result["ok"] else [],
     }

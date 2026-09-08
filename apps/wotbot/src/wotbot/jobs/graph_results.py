@@ -213,7 +213,7 @@ def code_result_from_graph_result(result: Any) -> dict[str, Any] | None:
 def _code_result_from_messages(messages: list[Any]) -> dict[str, Any] | None:
     stdout_parts: list[str] = []
     error_parts: list[str] = []
-    artifacts: list[dict[str, str]] = []
+    artifacts: list[dict[str, Any]] = []
 
     for message in _tool_messages(messages, "run_code"):
         content = _parsed_tool_message_content(message)
@@ -242,7 +242,7 @@ def _code_result_from_messages(messages: list[Any]) -> dict[str, Any] | None:
     return code_result
 
 
-def _artifacts_from_run_code_result(content: dict[str, Any]) -> list[dict[str, str]]:
+def _artifacts_from_run_code_result(content: dict[str, Any]) -> list[dict[str, Any]]:
     artifacts = _artifacts_from_mappings(content.get("artifacts"))
     if artifacts:
         return artifacts
@@ -250,13 +250,14 @@ def _artifacts_from_run_code_result(content: dict[str, Any]) -> list[dict[str, s
     return [
         *_artifacts_from_filenames(content.get("images"), ref_prefix="image", kind="image"),
         *_artifacts_from_filenames(content.get("plotly"), ref_prefix="chart", kind="plotly"),
+        *_artifacts_from_mappings(content.get("files")),
     ]
 
 
-def _artifacts_from_mappings(value: Any) -> list[dict[str, str]]:
+def _artifacts_from_mappings(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
-    artifacts: list[dict[str, str]] = []
+    artifacts: list[dict[str, Any]] = []
     for raw_artifact in value:
         artifact = _artifact_from_mapping(raw_artifact)
         if artifact:
@@ -279,34 +280,42 @@ def _artifacts_from_filenames(
     ]
 
 
-def _artifact_from_mapping(value: Any) -> dict[str, str] | None:
+def _artifact_from_mapping(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, dict):
         return None
     kind = value.get("kind")
     filename = value.get("filename")
     ref = value.get("ref")
-    if kind not in {"image", "plotly"}:
+    if kind not in {"image", "plotly", "file"}:
         return None
     if not isinstance(filename, str) or not filename:
         return None
     if not isinstance(ref, str) or not ref:
         ref = "artifact"
+    if kind == "file":
+        if not isinstance(value.get("id"), str) or not value["id"]:
+            return None
+        return {**value, "ref": ref}
     return {"ref": ref, "kind": kind, "filename": filename}
 
 
-def _dedupe_and_renumber_artifacts(artifacts: list[dict[str, str]]) -> list[dict[str, str]]:
+def _dedupe_and_renumber_artifacts(artifacts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[tuple[str, str]] = set()
     image_count = 0
     chart_count = 0
-    normalized: list[dict[str, str]] = []
+    file_count = 0
+    normalized: list[dict[str, Any]] = []
     for artifact in artifacts:
-        key = (artifact["kind"], artifact["filename"])
+        key = (artifact["kind"], artifact.get("id", artifact["filename"]))
         if key in seen:
             continue
         seen.add(key)
         if artifact["kind"] == "image":
             image_count += 1
             ref = f"image_{image_count}"
+        elif artifact["kind"] == "file":
+            file_count += 1
+            ref = f"file_{file_count}"
         else:
             chart_count += 1
             ref = f"chart_{chart_count}"

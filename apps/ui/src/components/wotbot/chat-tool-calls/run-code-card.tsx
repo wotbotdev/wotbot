@@ -12,6 +12,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
 
 import {
+  artifactKey,
   formatArtifactSummary,
   formatToolName,
   formatWotInteractionSummary,
@@ -28,10 +29,7 @@ export function RunCodeArtifacts({ result }: { result: RunCodeResult }) {
   return (
     <div className="space-y-2">
       {result.artifacts?.map((artifact) => (
-        <RunCodeArtifactCard
-          key={`${artifact.kind}:${artifact.filename}`}
-          artifact={artifact}
-        />
+        <RunCodeArtifactCard key={artifactKey(artifact)} artifact={artifact} />
       ))}
     </div>
   );

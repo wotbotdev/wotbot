@@ -12,9 +12,9 @@ import asyncio
 
 import httpx
 from fastapi import HTTPException
-from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from wotbot.agent.tools.contracts import tool
 from wotbot.catalog.ids import decode_thing_id
 from wotbot.catalog.service import ThingCatalogQueryService
 from wotbot.clients.code_executor import CodeExecutorClient

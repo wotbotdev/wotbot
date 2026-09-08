@@ -244,8 +244,18 @@ class JobExecutor:
                 session_id=f"job-analysis:{job.id}",
                 code=_analysis_code_for_run(job.action.analysis_code, trigger=trigger),
             )
-            stored_records = await self._store_analysis_records(job, run=run, response=response)
             formatted = format_code_execution_result(response)
+            if response.get("ok") is False:
+                error = str(response.get("error") or "Code execution failed")
+                return {
+                    **formatted,
+                    "ok": False,
+                    "error": error,
+                    "response": response,
+                    "assistant": error[:4000],
+                    "metadata": {"trigger": trigger},
+                }
+            stored_records = await self._store_analysis_records(job, run=run, response=response)
             stdout = str(formatted.get("stdout", "")).strip()
             artifacts = formatted.get("artifacts", [])
             if not isinstance(artifacts, list):
@@ -405,6 +415,7 @@ def _produced_summary(artifacts: list[Any], records: list[Any]) -> str:
 def _artifact_summary(artifacts: list[Any]) -> str:
     images = 0
     charts = 0
+    files = 0
     for artifact in artifacts:
         if not isinstance(artifact, dict):
             continue
@@ -412,12 +423,16 @@ def _artifact_summary(artifacts: list[Any]) -> str:
             images += 1
         elif artifact.get("kind") == "plotly":
             charts += 1
+        elif artifact.get("kind") == "file":
+            files += 1
 
     parts: list[str] = []
     if charts:
         parts.append(f"{charts} chart{'s' if charts != 1 else ''}")
     if images:
         parts.append(f"{images} image{'s' if images != 1 else ''}")
+    if files:
+        parts.append(f"{files} file{'s' if files != 1 else ''}")
     return ", ".join(parts)
 
 

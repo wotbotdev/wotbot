@@ -80,7 +80,7 @@ def test_things_search_uses_active_search_service():
     assert service.calls == [("light", 2)]
 
 
-def test_things_search_clamps_out_of_range_k():
+def test_things_search_rejects_out_of_range_k_before_searching():
     class FakeSearchService:
         def __init__(self) -> None:
             self.calls: list[tuple[str, int]] = []
@@ -97,9 +97,9 @@ def test_things_search_clamps_out_of_range_k():
     finally:
         set_active_search_service(None)
 
-    assert high["k"] == 20
-    assert low["k"] == 1
-    assert service.calls == [("temperature", 20), ("temperature", 1)]
+    assert "no operation ran" in high
+    assert "no operation ran" in low
+    assert service.calls == []
 
 
 def test_things_search_returns_tool_error_for_empty_query():

@@ -14,8 +14,13 @@ export type CatchAllToolCallRenderProps = {
 
 export type RunCodeArtifact = {
   filename: string;
-  kind: 'image' | 'plotly';
+  kind: 'image' | 'plotly' | 'file';
   ref: string;
+  id?: string;
+  mime_type?: string;
+  size_bytes?: number;
+  sha256?: string;
+  expires_at?: string;
 };
 
 export type RunCodeResult = {
@@ -24,6 +29,14 @@ export type RunCodeResult = {
   error?: string;
   wotInteractions?: WotInteraction[];
 };
+
+export function artifactKey(artifact: {
+  kind: string;
+  filename: string;
+  id?: string;
+}): string {
+  return `${artifact.kind}:${artifact.id ?? artifact.filename}`;
+}
 
 export const TOOL_STATUS_DESCRIPTION: Record<ToolCallStatus, string> = {
   inProgress: 'Collecting the tool inputs and preparing the next step.',
@@ -132,6 +145,7 @@ export function formatArtifactSummary(artifacts: RunCodeArtifact[]) {
     (artifact) => artifact.kind === 'plotly',
   ).length;
   const parts: string[] = [];
+  const files = artifacts.filter((artifact) => artifact.kind === 'file').length;
 
   if (charts) {
     parts.push(`${charts} chart${charts === 1 ? '' : 's'}`);
@@ -139,6 +153,9 @@ export function formatArtifactSummary(artifacts: RunCodeArtifact[]) {
 
   if (images) {
     parts.push(`${images} image${images === 1 ? '' : 's'}`);
+  }
+  if (files) {
+    parts.push(`${files} file${files === 1 ? '' : 's'}`);
   }
 
   return parts.join(' • ');
@@ -180,14 +197,21 @@ export function normalizeRunCodeResult(value: unknown): RunCodeResult {
       const candidate = artifact as Record<string, unknown>;
       const ref = typeof candidate.ref === 'string' ? candidate.ref : '';
       const kind =
-        candidate.kind === 'image' || candidate.kind === 'plotly'
+        candidate.kind === 'image' ||
+        candidate.kind === 'plotly' ||
+        candidate.kind === 'file'
           ? candidate.kind
           : null;
       const filename =
         typeof candidate.filename === 'string' ? candidate.filename : '';
 
       if (ref && kind && filename) {
-        artifacts.push({ ref, kind, filename });
+        if (kind === 'file') {
+          const file = normalizeFileArtifact(candidate, ref);
+          if (file) artifacts.push(file);
+        } else {
+          artifacts.push({ ref, kind, filename });
+        }
       }
     }
   }
@@ -217,10 +241,59 @@ export function normalizeRunCodeResult(value: unknown): RunCodeResult {
     }
   }
 
+  if (Array.isArray(raw.files)) {
+    for (const [index, candidate] of raw.files.entries()) {
+      if (
+        !candidate ||
+        typeof candidate !== 'object' ||
+        Array.isArray(candidate)
+      )
+        continue;
+      const file = normalizeFileArtifact(candidate, `file_${index + 1}`);
+      if (file && !artifacts.some((artifact) => artifact.id === file.id))
+        artifacts.push(file);
+    }
+  }
+
   return {
     artifacts,
     error: typeof raw.error === 'string' ? raw.error : undefined,
     stdout: typeof raw.stdout === 'string' ? raw.stdout : undefined,
     wotInteractions: parseWotInteractionList(raw.wot_calls),
+  };
+}
+
+function normalizeFileArtifact(
+  candidate: Record<string, unknown>,
+  ref: string,
+): RunCodeArtifact | null {
+  const id = typeof candidate.id === 'string' ? candidate.id : '';
+  const filename =
+    typeof candidate.filename === 'string' ? candidate.filename : '';
+  if (
+    !filename ||
+    !id.startsWith('file-') ||
+    !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,199}$/.test(id) ||
+    id.includes('..')
+  )
+    return null;
+  return {
+    ref,
+    kind: 'file',
+    filename,
+    id,
+    mime_type:
+      typeof candidate.mime_type === 'string' ? candidate.mime_type : undefined,
+    size_bytes:
+      typeof candidate.size_bytes === 'number' &&
+      Number.isFinite(candidate.size_bytes) &&
+      candidate.size_bytes >= 0
+        ? candidate.size_bytes
+        : undefined,
+    sha256: typeof candidate.sha256 === 'string' ? candidate.sha256 : undefined,
+    expires_at:
+      typeof candidate.expires_at === 'string'
+        ? candidate.expires_at
+        : undefined,
   };
 }

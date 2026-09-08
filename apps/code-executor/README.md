@@ -36,6 +36,18 @@ Each session has its own Python worker process. On POSIX systems, execution happ
 
 This gives the agent practical rollback behavior without resetting the whole session after every mistake.
 
+`POST /execute` returns an explicit `ok` status. Python failures return `ok: false`,
+a bounded `error` summary, and completed `wot_calls`, even when stdout is truncated.
+Failed runs discard generated artifacts, records and reports. Rolling back Python
+state does not undo device actions that already completed.
+
+The backend retries only connection/pool failures before sending a request. Lost
+responses, read/write transport failures and HTTP errors never automatically replay
+code. An uncertain outcome asks the caller to inspect device state before retrying.
+Deploy the executor and backend together: the backend requires a boolean `ok` in
+execution responses and treats missing status as an uncertain outcome. Analysis
+jobs record explicit Python failures as failed runs without storing output records.
+
 ## Execution Environment
 
 Workers preload common analysis tools:
@@ -57,9 +69,44 @@ Artifacts are written under `ARTIFACTS_DIR`, defaulting to `/tmp/code-executor-a
 - `plt.show()` captures the current Matplotlib figure as a PNG.
 - `fig.show()` captures Plotly figures as JSON that can be rendered by the UI.
 - `save_image(...)` stores PIL images, bytes, and file-like images as PNG artifacts.
+- `save_artifact(data, filename=..., mime_type=...)` exports bytes, UTF-8 text, or
+  an open binary stream. Serialize tables explicitly, for example:
+
+  ```python
+  save_artifact(df.to_csv(index=False), filename="data.csv", mime_type="text/csv")
+  ```
+
+  Files are staged during execution and published by the supervising process
+  only after success. Failed, cancelled and timed-out runs discard their staged
+  files. Same-session executions are serialized so their pipe responses and
+  files cannot be mixed. Results contain descriptors (`id`, filename, MIME type,
+  byte size, SHA-256 and expiry), without embedding file bodies.
 - A cleanup task removes idle sessions and artifacts older than `ARTIFACTS_TTL_SECONDS`.
 
 Artifact cleanup is TTL-based rather than tied directly to thread deletion.
+
+Exports use `FILE_ARTIFACTS_TTL_SECONDS` (default seven days from publication), independently of
+charts, images and HTML previews (one hour). Reads do not extend retention;
+expired exports are unavailable even before cleanup removes their bytes. Limits
+default to 64 MiB per file, 16 files per run, and 256 MiB total per run.
+
+The authenticated `/artifacts/{id}/metadata` route describes an artifact;
+`/artifacts/{id}/content` returns its original bytes as an attachment. The existing
+`/artifacts/{id}` route also serves new exports as attachments, including JSON
+and HTML, while legacy charts retain their preview behavior. The UI streams
+downloads and displays filenames, sizes and expiry in chat, jobs and live mode.
+
+Compose stores artifacts on the `executor-artifacts` volume at
+`/tmp/code-executor-artifacts`, preserving the path used by uploaded attachments.
+Build updated executor images before using this volume, so its directory belongs
+to `appuser` in both development and production. Existing temporary previews and
+uploads in an old container's `/tmp` are not migrated; preserve any needed files
+before recreating that container. Standalone deployments should point
+`ARTIFACTS_DIR` at persistent storage if exports must survive service replacement.
+
+These are app downloads under the existing deployment access model. Portable MCP
+download tickets and `wot.download_action` are separate interfaces and are not
+required by `save_artifact`.
 
 ## Security Boundary
 

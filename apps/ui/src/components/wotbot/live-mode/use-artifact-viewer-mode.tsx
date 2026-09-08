@@ -1,7 +1,15 @@
-import { ImageIcon, LineChart, PanelsTopLeft } from 'lucide-react';
+import { File, ImageIcon, LineChart, PanelsTopLeft } from 'lucide-react';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 
 import type { LiveModeArtifact } from '@/components/wotbot/assistant/artifacts';
+import { artifactKey } from '@/components/wotbot/chat-tool-call-model';
+
+const artifactLabels = {
+  image: { noun: 'image', Icon: ImageIcon },
+  plotly: { noun: 'chart', Icon: LineChart },
+  web: { noun: 'panel', Icon: PanelsTopLeft },
+  file: { noun: 'file', Icon: File },
+};
 
 type ReopenChipInfo = { icon: ReactNode; label: string };
 
@@ -23,10 +31,7 @@ export function useArtifactViewerMode({
   latestUserTranscript: string | null;
 }): ArtifactViewerMode {
   const artifactSignature = useMemo(
-    () =>
-      artifacts
-        .map((artifact) => `${artifact.kind}:${artifact.filename}`)
-        .join('|'),
+    () => artifacts.map(artifactKey).join('|'),
     [artifacts],
   );
   const hasArtifact = !!artifactSignature && !!latestAssistantText;
@@ -62,30 +67,14 @@ export function useArtifactViewerMode({
   const showReopenChip = hasArtifact && !inViewer;
   const reopenChipInfo = useMemo<ReopenChipInfo | null>(() => {
     if (artifacts.length === 0) return null;
-    const onlyImages = artifacts.every((artifact) => artifact.kind === 'image');
-    const onlyPanels = artifacts.every((artifact) => artifact.kind === 'web');
-    const noun = onlyImages
-      ? artifacts.length > 1
-        ? 'images'
-        : 'image'
-      : onlyPanels
-        ? artifacts.length > 1
-          ? 'panels'
-          : 'panel'
-        : artifacts.every((artifact) => artifact.kind === 'plotly')
-          ? artifacts.length > 1
-            ? 'charts'
-            : 'chart'
-          : 'results';
+    const kind = artifacts[0].kind;
+    const { noun, Icon } = artifacts.every((artifact) => artifact.kind === kind)
+      ? artifactLabels[kind]
+      : { noun: 'result', Icon: LineChart };
+    const label = artifacts.length > 1 ? `${artifacts.length} ${noun}s` : noun;
     return {
-      icon: onlyImages ? (
-        <ImageIcon className="size-4" />
-      ) : onlyPanels ? (
-        <PanelsTopLeft className="size-4" />
-      ) : (
-        <LineChart className="size-4" />
-      ),
-      label: `View ${artifacts.length > 1 ? `${artifacts.length} ` : ''}${noun}`,
+      icon: <Icon className="size-4" />,
+      label: `View ${label}`,
     };
   }, [artifacts]);
 

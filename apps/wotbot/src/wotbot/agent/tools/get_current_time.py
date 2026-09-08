@@ -3,7 +3,7 @@
 import time
 from datetime import datetime
 
-from langchain_core.tools import tool
+from wotbot.agent.tools.contracts import tool
 
 
 @tool

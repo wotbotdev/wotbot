@@ -11,7 +11,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from wotbot.clients.code_executor import CodeExecutorClient
+from wotbot.clients.code_executor import CodeExecutionUncertainError, CodeExecutorClient
 from wotbot.virtual_things.schemas import json_safe
 
 logger = logging.getLogger(__name__)
@@ -128,6 +128,8 @@ class VirtualThingHandlerRunner:
                 code=code,
                 timeout_seconds=getattr(binding, "timeout_seconds", None),
             )
+        except CodeExecutionUncertainError as exc:
+            raise VirtualThingHandlerError(str(exc)) from exc
         except httpx.TimeoutException as exc:
             raise TimeoutError("computed handler timed out") from exc
         except httpx.HTTPStatusError as exc:
@@ -142,6 +144,10 @@ class VirtualThingHandlerRunner:
             (time.perf_counter() - executor_started) * 1000,
         )
         stdout = str(response.get("stdout", ""))
+        if response.get("ok") is False:
+            raise VirtualThingHandlerError(
+                str(response.get("error") or stdout.strip() or "computed handler failed")
+            )
         found, payload = decode_result_envelope(stdout, result_token)
         if not found:
             raise VirtualThingHandlerError(

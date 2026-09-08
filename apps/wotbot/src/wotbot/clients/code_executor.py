@@ -11,8 +11,19 @@ from wotbot.core.settings import Settings
 logger = logging.getLogger(__name__)
 
 
-def build_code_artifacts(images: list[str], plotly: list[str]) -> list[dict[str, str]]:
-    artifacts: list[dict[str, str]] = []
+class CodeExecutionUncertainError(RuntimeError):
+    """The executor may have run the program before its response was lost."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The code execution outcome is unknown. The program may already have applied "
+            "device actions; it was not automatically retried. Inspect current device state "
+            "before deciding whether to run any part of the program again."
+        )
+
+
+def build_code_artifacts(images: list[str], plotly: list[str]) -> list[dict[str, Any]]:
+    artifacts: list[dict[str, Any]] = []
 
     for index, filename in enumerate(images, start=1):
         if not isinstance(filename, str) or not filename:
@@ -49,7 +60,15 @@ def format_code_execution_result(data: dict[str, Any]) -> dict[str, object]:
     )
     wot_calls = data.get("wot_calls", [])
 
+    for index, artifact in enumerate(data.get("files", []) or [], start=1):
+        if isinstance(artifact, dict) and isinstance(artifact.get("id"), str):
+            artifacts.append({**artifact, "ref": f"file_{index}", "kind": "file"})
+
     result: dict[str, object] = {}
+    if "ok" in data:
+        result["ok"] = data["ok"]
+    if data.get("error"):
+        result["error"] = data["error"]
     if stdout:
         result["stdout"] = stdout
     if artifacts:
@@ -114,8 +133,12 @@ class CodeExecutorClient:
                     )
                     response.raise_for_status()
                     body = response.json()
-                    return body if isinstance(body, dict) else {}
-                except (httpx.TransportError, httpx.TimeoutException) as exc:
+                    if not isinstance(body, dict) or not isinstance(body.get("ok"), bool):
+                        raise CodeExecutionUncertainError()
+                    return body
+                except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
+                    # These failures occur before sending a request. Read/write
+                    # failures and HTTP errors can follow real device actions.
                     last_error = exc
                     if attempt >= attempts:
                         break
@@ -129,22 +152,16 @@ class CodeExecutorClient:
                     )
                     if sleep_seconds > 0:
                         await asyncio.sleep(sleep_seconds)
+                except (httpx.TransportError, httpx.DecodingError) as exc:
+                    raise CodeExecutionUncertainError() from exc
                 except httpx.HTTPStatusError as exc:
-                    last_error = exc
-                    status = exc.response.status_code
-                    retriable = status in {429, 502, 503, 504}
-                    if not retriable or attempt >= attempts:
-                        raise
-                    sleep_seconds = base_backoff * (2 ** (attempt - 1))
-                    logger.warning(
-                        "Code executor returned %s (attempt %s/%s); retrying in %.2fs",
-                        status,
-                        attempt,
-                        attempts,
-                        sleep_seconds,
-                    )
-                    if sleep_seconds > 0:
-                        await asyncio.sleep(sleep_seconds)
+                    if exc.response.status_code >= 500 or exc.response.status_code == 408:
+                        raise CodeExecutionUncertainError() from exc
+                    raise
+                except ValueError as exc:
+                    # A malformed response says nothing about whether execution
+                    # happened; never turn it into an empty successful result.
+                    raise CodeExecutionUncertainError() from exc
 
         if last_error is not None:
             raise last_error

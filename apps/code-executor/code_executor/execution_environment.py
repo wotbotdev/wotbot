@@ -13,6 +13,8 @@ from contextlib import redirect_stdout
 from typing import Any
 
 from code_executor.constants import MAX_STDOUT_CHARS, SENSITIVE_ENV_VARS
+from code_executor.file_artifacts import FileArtifacts
+from code_executor.models.settings import Settings
 from code_executor.wot_client import SandboxWotClient
 
 _LAST_EXPR_GLOBAL = "__code_executor_last_expr__"
@@ -27,15 +29,22 @@ class ExecutionEnvironment:
         artifacts_dir: str,
         runtime_url: str,
         runtime_api_token: str,
+        file_settings: dict[str, Any] | None = None,
     ) -> None:
         self.artifacts_dir = artifacts_dir
         self.images: list[str] = []
         self.plotly: list[str] = []
+        self.files: list[dict[str, Any]] = []
         self.wot_calls: list[dict[str, Any]] = []
         self.records: list[dict[str, Any]] = []
         self.reports: list[str] = []
 
         self._prepare_process_environment()
+        self.file_store = FileArtifacts(
+            Settings(
+                _env_file=None, artifacts_dir=artifacts_dir, **(file_settings or {})
+            )
+        )
         self._load_runtime_modules()
         self._install_plotly_renderer()
 
@@ -47,7 +56,11 @@ class ExecutionEnvironment:
         self._register_wot_module()
         self.user_globals = self._build_user_globals()
 
-    def execute_code(self, code: str) -> dict[str, Any]:
+    def execute_code(
+        self, code: str, execution_id: str | None = None
+    ) -> dict[str, Any]:
+        self.execution_id = execution_id or uuid.uuid4().hex
+        self.files.clear()
         self.images.clear()
         self.plotly.clear()
         self.wot_calls.clear()
@@ -58,11 +71,21 @@ class ExecutionEnvironment:
         original_plt_show = self.plt.show
         original_pio_show = self.pio.show
         original_renderer = self.pio.renderers.default
-        self.plt.show = self._capture_matplotlib_figure
-        self.pio.show = self._capture_plotly_figure
+
+        # Matplotlib's lazy backend initialization sets attributes on plt.show;
+        # plain functions accept those attributes, while bound methods do not.
+        def capture_matplotlib(*args: Any, **kwargs: Any) -> None:
+            self._capture_matplotlib_figure()
+
+        def capture_plotly(*args: Any, **kwargs: Any) -> Any:
+            return self._capture_plotly_figure(*args, **kwargs)
+
+        self.plt.show = capture_matplotlib
+        self.pio.show = capture_plotly
         self.pio.renderers.default = "capture"
 
         success = True
+        error = None
         try:
             with redirect_stdout(stdout_buffer):
                 self.user_globals.pop(_LAST_EXPR_GLOBAL, None)
@@ -70,9 +93,11 @@ class ExecutionEnvironment:
                 exec(compiled_code, self.user_globals)
                 if captures_last_expr:
                     self._print_last_expression_value(stdout_buffer)
-        except Exception:
+        except BaseException:
+            # SystemExit/KeyboardInterrupt in user code are failed executions
+            # too; retain stdout and run the same artifact cleanup.
             success = False
-            self._print_short_traceback(stdout_buffer)
+            error = self._print_short_traceback(stdout_buffer)
         finally:
             self.plt.show = original_plt_show
             self.pio.show = original_pio_show
@@ -88,12 +113,20 @@ class ExecutionEnvironment:
             plotly = []
             records = []
             reports = []
+            self.files.clear()
+        if execution_id is None:
+            try:
+                self.files = self.file_store.publish(self.execution_id, self.files)
+            finally:
+                self.file_store.discard(self.execution_id)
 
         return {
             "ok": success,
+            "error": error,
             "stdout": self._trim_stdout(stdout_buffer.getvalue()),
             "images": images,
             "plotly": plotly,
+            "files": self.files.copy(),
             "wot_calls": self.wot_calls.copy(),
             "records": records,
             "reports": reports,
@@ -122,6 +155,7 @@ class ExecutionEnvironment:
             or self.reports
             or self.images
             or self.plotly
+            or self.files
         ):
             return
 
@@ -184,10 +218,28 @@ class ExecutionEnvironment:
             "print": print,
             "pio": self.pio,
             "save_image": self.save_image,
+            "save_artifact": self.save_artifact,
             "store_record": self.store_record,
             "report": self.report,
             "wot": self.wot,
         }
+
+    def save_artifact(
+        self,
+        data: Any,
+        *,
+        filename: str,
+        mime_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Save bytes, UTF-8 text or a binary stream; publish only after success."""
+        artifact = self.file_store.save(
+            self.execution_id,
+            data,
+            filename=filename,
+            mime_type=mime_type,
+        )
+        self.files.append(artifact)
+        return artifact
 
     def report(self, message: Any) -> None:
         """Set the human-facing headline for an analysis run.
@@ -268,7 +320,7 @@ class ExecutionEnvironment:
                 pass
 
     @staticmethod
-    def _print_short_traceback(stdout_buffer: io.StringIO) -> None:
+    def _print_short_traceback(stdout_buffer: io.StringIO) -> str:
         with redirect_stdout(stdout_buffer):
             tb = traceback.format_exc()
             lines = tb.strip().splitlines()
@@ -281,6 +333,7 @@ class ExecutionEnvironment:
                 print(f"Error: {error_line}\nAt: {source_line}")
             else:
                 print(f"Error: {error_line}")
+            return error_line[:MAX_STDOUT_CHARS]
 
     @staticmethod
     def _trim_stdout(stdout: str) -> str:

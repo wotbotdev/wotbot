@@ -293,6 +293,37 @@ class JobGraphResultsTestCase(unittest.TestCase):
         self.assertEqual(job_result["artifacts"], code_result["artifacts"])
         self.assertEqual(job_result["stdout"], "created plot")
 
+    def test_file_exports_preserve_metadata_and_deduplicate_by_id(self) -> None:
+        import json
+
+        first = {
+            "id": "file-first.csv",
+            "ref": "file_1",
+            "kind": "file",
+            "filename": "data.csv",
+            "size_bytes": 8,
+            "sha256": "digest",
+            "expires_at": "2026-09-15T12:00:00Z",
+        }
+        second = {**first, "id": "file-second.csv"}
+        result = {
+            "messages": [
+                ToolMessage(
+                    content=json.dumps({"artifacts": [first, second, first]}),
+                    name="run_code",
+                    tool_call_id="files",
+                ),
+                AIMessage(content="Two exports are ready."),
+            ]
+        }
+        job_result = job_result_from_graph_result(
+            result,
+            job=_job(output_kind=JobOutputKind.NARRATIVE),
+            message=None,
+            trigger={"source": "manual"},
+        )
+        assert job_result["artifacts"] == [first, {**second, "ref": "file_2"}]
+
     def test_run_code_stdout_only_is_not_promoted_for_prompt_jobs(self) -> None:
         result = {
             "messages": [

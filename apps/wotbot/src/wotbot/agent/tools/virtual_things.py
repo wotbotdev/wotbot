@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Annotated, Any
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
+from pydantic import Field
 
 from wotbot.agent.tools._config import thread_id_from_config as _thread_id_from_config
+from wotbot.agent.tools.contracts import tool
 from wotbot.core.time import utc_now
 from wotbot.virtual_things.builder import (
     VirtualThingBuilder,
@@ -67,7 +68,7 @@ async def add_virtual_property(
     name: str,
     handler_code: str,
     value_schema: dict[str, Any] | None = None,
-    cache_ttl_seconds: int = 30,
+    cache_ttl_seconds: Annotated[int, Field(ge=0)] = 30,
 ) -> dict[str, Any]:
     """Add or replace a computed property on a virtual Thing.
 

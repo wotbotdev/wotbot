@@ -9,12 +9,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from code_executor.api.app import app
 from code_executor.api.dependencies import verify_api_key
+from code_executor.file_artifacts import FileArtifacts
 from code_executor.models import (
     ExecuteRequest,
     ExecuteResponse,
+    UploadResponse,
     WebArtifactRequest,
     WebArtifactResponse,
-    UploadResponse,
 )
 from code_executor.utils import plotly_json_to_html
 
@@ -87,9 +88,17 @@ async def get_artifact(filename: str, request: Request):
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    filepath = os.path.join(settings.artifacts_dir, filename)
-    if not os.path.isfile(filepath):
-        raise HTTPException(status_code=404, detail="Artifact not found")
+    try:
+        store = FileArtifacts(settings)
+        filepath = str(store.path(filename))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid artifact id") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Artifact not found or expired"
+        ) from exc
+    if (store.root / ".manifests" / filename).is_file():
+        return await get_artifact_content(filename, request)
 
     if filename.endswith(".png"):
         return FileResponse(filepath, media_type="image/png")
@@ -105,6 +114,41 @@ async def get_artifact(filename: str, request: Request):
         return HTMLResponse(content=html)
 
     return FileResponse(filepath)
+
+
+@app.get("/artifacts/{filename}/metadata", dependencies=[Depends(verify_api_key)])
+async def get_artifact_metadata(filename: str, request: Request):
+    try:
+        return FileArtifacts(request.app.state.settings).describe(filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid artifact id") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Artifact not found or expired"
+        ) from exc
+
+
+@app.get("/artifacts/{filename}/content", dependencies=[Depends(verify_api_key)])
+async def get_artifact_content(filename: str, request: Request):
+    metadata = await get_artifact_metadata(filename, request)
+    store = FileArtifacts(request.app.state.settings)
+    try:
+        path = store.path(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Artifact not found or expired"
+        ) from exc
+    return FileResponse(
+        path,
+        media_type=metadata["mime_type"],
+        filename=metadata["filename"],
+        headers={
+            "X-Artifact-SHA256": metadata["sha256"],
+            "X-Artifact-Expires-At": metadata["expires_at"],
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @app.delete("/sessions/{session_id}", dependencies=[Depends(verify_api_key)])

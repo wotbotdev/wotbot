@@ -7,12 +7,12 @@ it directly instead of round-tripping through the HTTP job API.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
 from pydantic import Field, ValidationError
 
+from wotbot.agent.tools.contracts import tool
 from wotbot.jobs.active import get_active_job_service
 from wotbot.jobs.enums import (
     JobActionKind,
@@ -36,7 +36,7 @@ def _thread_id_from_config(
 
 def _trigger_payload(
     *,
-    trigger_kind: str,
+    trigger_kind: Literal["time", "event"],
     schedule_kind: str | None,
     run_at: str | None,
     interval_seconds: int | None,
@@ -110,13 +110,13 @@ async def create_prompt_job(
             )
         ),
     ],
-    trigger_kind: str,
+    trigger_kind: Literal["time", "event"],
     config: RunnableConfig,
-    interaction_mode: str = JobInteractionMode.AUTONOMOUS.value,
-    schedule_kind: str | None = None,
+    interaction_mode: JobInteractionMode = JobInteractionMode.AUTONOMOUS,
+    schedule_kind: Literal["once", "interval", "cron"] | None = None,
     created_from_thread_id: str | None = None,
     run_at: str | None = None,
-    interval_seconds: int | None = None,
+    interval_seconds: Annotated[int | None, Field(gt=0)] = None,
     cron_expression: str | None = None,
     cron_timezone: str | None = None,
     thing_id: str | None = None,
@@ -179,16 +179,16 @@ async def create_record_prompt_job(
         ),
     ],
     record_schema: dict[str, Any],
-    trigger_kind: str,
+    trigger_kind: Literal["time", "event"],
     config: RunnableConfig,
-    interaction_mode: str = JobInteractionMode.REQUIRED_CHECKIN.value,
+    interaction_mode: JobInteractionMode = JobInteractionMode.REQUIRED_CHECKIN,
     virtual_thing_title: str | None = None,
     virtual_thing_description: str | None = None,
     virtual_thing_id: str | None = None,
-    schedule_kind: str | None = None,
+    schedule_kind: Literal["once", "interval", "cron"] | None = None,
     created_from_thread_id: str | None = None,
     run_at: str | None = None,
-    interval_seconds: int | None = None,
+    interval_seconds: Annotated[int | None, Field(gt=0)] = None,
     cron_expression: str | None = None,
     cron_timezone: str | None = None,
     thing_id: str | None = None,
@@ -241,12 +241,12 @@ async def create_record_prompt_job(
 async def create_analysis_job(
     name: str,
     analysis_code: str,
-    trigger_kind: str,
+    trigger_kind: Literal["time", "event"],
     config: RunnableConfig,
-    schedule_kind: str | None = None,
+    schedule_kind: Literal["once", "interval", "cron"] | None = None,
     created_from_thread_id: str | None = None,
     run_at: str | None = None,
-    interval_seconds: int | None = None,
+    interval_seconds: Annotated[int | None, Field(gt=0)] = None,
     cron_expression: str | None = None,
     cron_timezone: str | None = None,
     thing_id: str | None = None,
@@ -257,7 +257,11 @@ async def create_analysis_job(
     virtual_thing_description: str | None = None,
     virtual_thing_id: str | None = None,
 ) -> dict[str, Any]:
-    """Create an analysis job that runs Python in the code-executor sandbox.
+    """Schedule self-contained Python; creation does not run it immediately.
+
+    Include all imports and inputs: chat variables are unavailable. Use
+    save_artifact(..., filename="data.csv") for file exports and fig.show() for
+    charts. Let exceptions propagate so failed runs are recorded as failures.
 
     trigger_kind:
     - "time": use run_at, interval_seconds, or cron_expression (recurring calendar cadence)

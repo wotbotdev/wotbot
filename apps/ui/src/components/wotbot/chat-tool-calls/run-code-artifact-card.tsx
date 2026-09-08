@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/tooltip';
 
 import { type RunCodeArtifact } from '../chat-tool-call-model';
+import { FileArtifactCard } from './file-artifact-card';
 
 export const RunCodeArtifactCard = memo(function RunCodeArtifactCard({
   artifact,
@@ -32,6 +33,7 @@ export const RunCodeArtifactCard = memo(function RunCodeArtifactCard({
 }) {
   const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
   const [showPreview, setShowPreview] = useState(true);
+  if (artifact.kind === 'file') return <FileArtifactCard artifact={artifact} />;
   const artifactType =
     artifact.kind === 'plotly' ? 'Interactive chart' : 'Generated image';
 

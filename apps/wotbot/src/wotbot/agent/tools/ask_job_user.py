@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import tool
 from langgraph.types import interrupt
+
+from wotbot.agent.tools.contracts import tool
 
 
 @tool

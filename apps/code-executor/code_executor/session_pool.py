@@ -9,8 +9,10 @@ import os
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 from code_executor.constants import SESSION_WATCHDOG_GRACE_SECONDS
+from code_executor.file_artifacts import FileArtifacts
 from code_executor.models import Settings
 from code_executor.processes import pid_is_alive, terminate_pid
 from code_executor.worker import worker_loop
@@ -23,6 +25,7 @@ class _SessionEntry:
     worker_pid: int
     parent_conn: mp.connection.Connection
     last_used: float = field(default_factory=time.time)
+    execution_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class SessionPool:
@@ -31,14 +34,11 @@ class SessionPool:
         self._sessions: dict[str, _SessionEntry] = {}
         self._lock = asyncio.Lock()
         self._artifacts_dir = settings.artifacts_dir
-        os.makedirs(self._artifacts_dir, exist_ok=True)
+        self._file_store = FileArtifacts(settings)
 
     def _get_or_create_session(self, session_id: str) -> _SessionEntry:
         if session_id in self._sessions:
-            entry = self._sessions[session_id]
-            if self._worker_is_available(session_id, entry):
-                entry.last_used = time.time()
-                return entry
+            return self._sessions[session_id]
 
         if len(self._sessions) >= self._settings.max_sessions:
             raise RuntimeError(
@@ -56,6 +56,15 @@ class SessionPool:
                 self._settings.wot_runtime_url,
                 self._settings.wot_runtime_api_token,
                 self._settings.execution_timeout_seconds,
+                self._settings.model_dump(
+                    include={
+                        "artifacts_ttl_seconds",
+                        "file_artifacts_ttl_seconds",
+                        "artifact_max_bytes",
+                        "artifact_max_files_per_execution",
+                        "artifact_max_execution_bytes",
+                    }
+                ),
             ),
             daemon=True,
         )
@@ -80,18 +89,58 @@ class SessionPool:
 
     async def execute(self, session_id: str, code: str) -> dict[str, Any]:
         """Execute code in the isolated session process, return artifacts and stdout."""
-        async with self._lock:
-            entry = self._get_or_create_session(session_id)
+        while True:
+            async with self._lock:
+                entry = self._get_or_create_session(session_id)
+            async with entry.execution_lock:
+                async with self._lock:
+                    # Check liveness only after the preceding execution has
+                    # reported its promoted worker PID and released this lock.
+                    if self._sessions.get(session_id) is not entry:
+                        continue
+                    if not self._worker_is_available(session_id, entry):
+                        continue
+                return await self._execute_entry(entry, code)
 
+    async def _execute_entry(self, entry: _SessionEntry, code: str) -> dict[str, Any]:
         entry.last_used = time.time()
-        result = await self._communicate(entry, code)
+        execution_id = uuid4().hex
+        communication = asyncio.create_task(
+            self._communicate(entry, code, execution_id)
+        )
+        try:
+            cancellation = None
+            while True:
+                try:
+                    result = await asyncio.shield(communication)
+                    break
+                except asyncio.CancelledError as exc:
+                    if communication.cancelled():
+                        raise
+                    # Repeated cancellation must also leave the pipe exchange
+                    # running until it can be drained under the session lock.
+                    cancellation = exc
+                except Exception:
+                    if cancellation is not None:
+                        raise cancellation
+                    raise
+            next_worker_pid = result.pop("worker_pid", None)
+            if next_worker_pid:
+                entry.worker_pid = next_worker_pid
+            if cancellation is not None:
+                raise cancellation
+            if result.get("ok") is True:
+                result["files"] = self._file_store.publish(
+                    execution_id, result.get("files", [])
+                )
+        finally:
+            self._file_store.discard(execution_id)
+            entry.last_used = time.time()
 
-        next_worker_pid = result.pop("worker_pid", None)
-        if next_worker_pid:
-            entry.worker_pid = next_worker_pid
-
-        if "error" in result:
-            raise RuntimeError(result["error"])
+        if not isinstance(result.get("ok"), bool):
+            raise RuntimeError(
+                result.get("error") or "Code execution returned no status"
+            )
 
         return result
 
@@ -99,13 +148,14 @@ class SessionPool:
         self,
         entry: _SessionEntry,
         code: str,
+        execution_id: str,
     ) -> dict[str, Any]:
         timeout = self._settings.execution_timeout_seconds
         watchdog_timeout = timeout + SESSION_WATCHDOG_GRACE_SECONDS
         loop = asyncio.get_event_loop()
 
         def _send_and_receive() -> dict[str, Any]:
-            entry.parent_conn.send(code)
+            entry.parent_conn.send((code, execution_id))
             if not entry.parent_conn.poll(watchdog_timeout):
                 raise TimeoutError(
                     "Code execution session became unresponsive while waiting "
@@ -166,13 +216,15 @@ class SessionPool:
             to_remove = [
                 sid
                 for sid, entry in self._sessions.items()
-                if now - entry.last_used > self._settings.idle_timeout_seconds
+                if not entry.execution_lock.locked()
+                and now - entry.last_used > self._settings.idle_timeout_seconds
             ]
         for sid in to_remove:
             logger.info("Reaping idle session %s", sid)
             await self.shutdown(sid)
 
     def cleanup_old_artifacts(self) -> None:
+        self._file_store.cleanup()
         now = time.time()
         ttl = self._settings.artifacts_ttl_seconds
         try:

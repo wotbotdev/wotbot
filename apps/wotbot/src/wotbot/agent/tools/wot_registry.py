@@ -3,13 +3,14 @@
 import asyncio
 import json
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import HTTPException
-from langchain_core.tools import tool
 from langgraph.types import interrupt
+from pydantic import Field
 from sqlalchemy.orm import Session
 
+from wotbot.agent.tools.contracts import tool
 from wotbot.catalog import serialize_thing, validate_document
 from wotbot.catalog.ids import decode_thing_id
 from wotbot.catalog.service import ThingCatalogQueryService, ThingCatalogWriteService
@@ -150,8 +151,8 @@ async def registry_health() -> dict[str, Any]:
 @tool
 async def things_list(
     query: str = "",
-    page: int = 1,
-    per_page: int = 25,
+    page: Annotated[int, Field(ge=1, le=1_000_000)] = 1,
+    per_page: Annotated[int, Field(ge=1, le=200)] = 25,
     origin_kind: str = "",
 ) -> dict[str, Any]:
     """List stored Thing Descriptions from the registry catalog. Optionally
@@ -171,8 +172,19 @@ async def things_list(
 
 
 @tool
-async def things_search(query: str, k: int = 5) -> dict[str, Any]:
-    """Run semantic Thing search across the catalog."""
+async def things_search(
+    query: str,
+    k: Annotated[int, Field(ge=1, le=20)] = 5,
+    include_summary: bool = False,
+) -> dict[str, Any]:
+    """Find ranked local Things by meaning, purpose or location.
+
+    Returns compact metadata. Set include_summary=true for full search-index prose.
+    Inspect matches with things_get or an affordance getter before using names,
+    schemas or units. Matches are not exhaustive; use things_sparql for counts,
+    joins or structured filters. Search external catalogs with sources_search
+    and discover_external; an empty local search says nothing about their contents.
+    """
     normalized_query = query.strip()
     if not normalized_query:
         return {"error": "query must not be empty", "items": [], "query": normalized_query}
@@ -182,11 +194,16 @@ async def things_search(query: str, k: int = 5) -> dict[str, Any]:
         return {"error": "Search service is not ready", "items": [], "query": normalized_query}
 
     items = await search_service.search(query=normalized_query, k=normalized_k)
+    if not include_summary:
+        items = [{key: value for key, value in item.items() if key != "summary"} for item in items]
     return {"items": items, "query": normalized_query, "k": normalized_k}
 
 
 @tool
-async def things_sparql(query: str, limit: int = 50) -> dict[str, Any]:
+async def things_sparql(
+    query: str,
+    limit: Annotated[int, Field(ge=1, le=500)] = 50,
+) -> dict[str, Any]:
     """Run a read-only SPARQL query over the local Thing knowledge graph.
 
     Use this for structured questions about registered Things that semantic search
@@ -212,7 +229,9 @@ async def things_sparql(query: str, limit: int = 50) -> dict[str, Any]:
 
 
 @tool
-async def describe_rdf_schema(limit: int = 50) -> dict[str, Any]:
+async def describe_rdf_schema(
+    limit: Annotated[int, Field(ge=1, le=200)] = 50,
+) -> dict[str, Any]:
     """List the domain classes and predicates present in the local Thing knowledge graph.
 
     Call this before writing a things_sparql query when unsure which classes or predicates

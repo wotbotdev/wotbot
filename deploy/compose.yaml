@@ -182,6 +182,8 @@ services:
     image: ghcr.io/wotbotdev/code-executor:latest
     init: true
     env_file: ../.env
+    volumes:
+      - executor-artifacts:/tmp/code-executor-artifacts
     read_only: true
     tmpfs:
       - /tmp:size=100M
@@ -202,6 +204,7 @@ services:
       MAX_SESSIONS: "50"
       LOG_LEVEL: "INFO"
       WOT_RUNTIME_URL: "http://wot-runtime:3003"
+      ARTIFACTS_DIR: "/tmp/code-executor-artifacts"
     restart: unless-stopped
 
   valkey:
@@ -287,6 +290,7 @@ services:
       VIRTUAL_SERVIENT_REGISTRY_TOKEN: "${VIRTUAL_SERVIENT_REGISTRY_TOKEN:-${WOT_RUNTIME_REGISTRY_TOKEN:-}}"
 
 volumes:
+  executor-artifacts:
   wotbot-data:
   postgres-data:
   rdf-data:

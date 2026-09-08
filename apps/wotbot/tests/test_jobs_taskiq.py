@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import unittest
 import contextlib
 import io
+import unittest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -14,9 +14,11 @@ from langgraph.types import Command
 from taskiq import ScheduledTask
 from taskiq.exceptions import TaskiqResultTimeoutError
 
+from tests.job_helpers import create_job_request
+from wotbot.agent.tools.submit_job_record import submit_job_record
 from wotbot.core.settings import Settings
-from wotbot.jobs.events import JobEventConsumer
 from wotbot.jobs.domain import JobDefinition
+from wotbot.jobs.events import JobEventConsumer
 from wotbot.jobs.executor import (
     BackgroundAgentRunner,
     JobExecutor,
@@ -29,6 +31,8 @@ from wotbot.jobs.graph_results import (
 )
 from wotbot.jobs.models import (
     CreateJobRequest as CreateJobRequestModel,
+)
+from wotbot.jobs.models import (
     Job,
     JobActionKind,
     JobInteractionMode,
@@ -40,21 +44,21 @@ from wotbot.jobs.models import (
     JobRunStatus,
     JobTriggerKind,
     TimeTriggerKind,
+)
+from wotbot.jobs.models import (
     UpdateJobRequest as UpdateJobRequestModel,
 )
-from wotbot.jobs.routes import router as jobs_router
-from wotbot.jobs.routes import _messages_from_job_run_events
+from wotbot.jobs.record_summary import submitted_record_event_message
 from wotbot.jobs.resources import JobResourceManager
+from wotbot.jobs.routes import _messages_from_job_run_events
+from wotbot.jobs.routes import router as jobs_router
 from wotbot.jobs.schedule import (
     JobScheduleManager,
     schedule_id_for_job,
     scheduled_task_for_job,
 )
-from wotbot.jobs.record_summary import submitted_record_event_message
 from wotbot.jobs.service import JobService
 from wotbot.jobs.stores import JobNotWaitingForInput
-from wotbot.agent.tools.submit_job_record import submit_job_record
-from tests.job_helpers import create_job_request
 
 
 def update_job_request(**values):
@@ -874,6 +878,38 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("1 chart", result["assistant"])
         self.assertIn("1 image", result["assistant"])
         agent_runner.run.assert_not_called()
+
+    async def test_failed_analysis_is_recorded_as_failed_with_completed_actions(self) -> None:
+        repo = _FakeRepo(
+            _job(
+                action_kind=JobActionKind.ANALYSIS,
+                prompt=None,
+                analysis_code="write(); raise ValueError('after write')",
+            )
+        )
+        calls = [{"thing_id": "urn:test:device", "name": "target", "ok": True}]
+        code_executor = AsyncMock()
+        code_executor.execute.return_value = {
+            "ok": False,
+            "error": "ValueError: after write",
+            "stdout": "before failure",
+            "wot_calls": calls,
+        }
+        executor = JobExecutor(
+            Settings(),
+            repo=repo,
+            code_executor_client=code_executor,
+            agent_runner=AsyncMock(),
+            event_publisher=_FakePublisher(),
+        )
+        with patch.object(executor, "_store_analysis_records", new=AsyncMock()) as store:
+            result = await executor.run_job("job-1", {"source": "manual"})
+        store.assert_not_awaited()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["wot_calls"], calls)
+        self.assertEqual(repo.finished_runs[0]["status"], JobRunStatus.FAILED)
+        self.assertEqual(repo.finished_runs[0]["error"], "ValueError: after write")
+        self.assertEqual(repo.finished_runs[0]["result"]["wot_calls"], calls)
 
     async def test_event_analysis_job_injects_decoded_event_payload(self) -> None:
         repo = _FakeRepo(
