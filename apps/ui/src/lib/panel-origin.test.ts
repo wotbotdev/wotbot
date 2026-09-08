@@ -89,3 +89,16 @@ test('panel hosts are told apart from the app host', () => {
     true,
   );
 });
+
+test('a template with a port still isolates panel hosts from console routes', () => {
+  // A request hostname never carries a port, so a template that does must have
+  // it stripped before the suffix match -- otherwise nothing is a panel host
+  // and the proxy hands panel traffic to the app.
+  const template = '{key}.panels.localhost:3131';
+  const origin = getPanelOrigin('saved-panel', local, template);
+
+  assert.equal(new URL(origin).port, '3131');
+  assert.equal(isPanelHostname(new URL(origin).hostname, template), true);
+  assert.equal(isPanelHostname('localhost', template), false);
+  assert.equal(isPanelHostname('panels.localhost', template), false);
+});
