@@ -175,8 +175,12 @@ function toToolCallParts(message: LangChainMessage): ToolCallPart[] {
   return calls;
 }
 
-export function toThreadMessages(
+function convertThreadMessages(
   messages: readonly LangChainMessage[] | undefined,
+  readToolResult = (message: LangChainMessage) =>
+    decodeToolResult(message.content),
+  readSummary = (message: LangChainMessage) =>
+    parseDeviceInteractionSummaryContent(message.content),
 ): ThreadMessageLike[] {
   if (!messages?.length) {
     return [];
@@ -258,7 +262,7 @@ export function toThreadMessages(
         ? callsById.get(message.tool_call_id)
         : undefined;
       if (call) {
-        call.result = decodeToolResult(message.content);
+        call.result = readToolResult(message);
         if (message.status === 'error') {
           call.isError = true;
         }
@@ -281,9 +285,7 @@ export function toThreadMessages(
     }
 
     if (type === 'ai' || type === 'assistant' || type === 'AIMessageChunk') {
-      const interactions = parseDeviceInteractionSummaryContent(
-        message.content,
-      );
+      const interactions = readSummary(message);
       if (interactions.length > 0) {
         turnParts(message.id).push({
           type: 'tool-call',
@@ -326,4 +328,94 @@ export function toThreadMessages(
 
   closeTurn();
   return result;
+}
+
+export function toThreadMessages(
+  messages: readonly LangChainMessage[] | undefined,
+): ThreadMessageLike[] {
+  return convertThreadMessages(messages);
+}
+
+/** Stable callback: changing this identity clears assistant-ui's converter cache. */
+export const identityThreadMessage = (message: ThreadMessageLike) => message;
+
+function shallowEqual(a: Json, b: Json): boolean {
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every((key) => Object.hasOwn(b, key) && a[key] === b[key])
+  );
+}
+
+function samePart(a: ContentPart, b: ContentPart): boolean {
+  if (a.type !== b.type) return false;
+  if (a.type !== 'tool-call' || b.type !== 'tool-call') {
+    return shallowEqual(a, b);
+  }
+  return (
+    a.toolCallId === b.toolCallId &&
+    a.toolName === b.toolName &&
+    a.result === b.result &&
+    a.isError === b.isError &&
+    shallowEqual(a.args, b.args)
+  );
+}
+
+/**
+ * Per-runtime conversion for immutable LangGraph snapshots. Decode each tool
+ * result/summary once, then preserve equal messages and parts across tokens so
+ * completed cards and Markdown can keep their render caches. Weak keys let old
+ * stream snapshots and edited-away results be collected.
+ */
+export function createThreadMessageConverter() {
+  const results = new WeakMap<LangChainMessage, unknown>();
+  const summaries = new WeakMap<
+    LangChainMessage,
+    ReturnType<typeof parseDeviceInteractionSummaryContent>
+  >();
+  let previous: ThreadMessageLike[] = [];
+
+  return (
+    messages: readonly LangChainMessage[] | undefined,
+  ): ThreadMessageLike[] => {
+    const next = convertThreadMessages(
+      messages,
+      (message) => {
+        if (!results.has(message))
+          results.set(message, decodeToolResult(message.content));
+        return results.get(message);
+      },
+      (message) => {
+        let summary = summaries.get(message);
+        if (!summary) {
+          summary = parseDeviceInteractionSummaryContent(message.content);
+          summaries.set(message, summary);
+        }
+        return summary;
+      },
+    ).map((message, index) => {
+      const old = previous[index];
+      if (!old || old.id !== message.id || old.role !== message.role)
+        return message;
+      const oldParts = old.content as ContentPart[];
+      const newParts = message.content as ContentPart[];
+      const content = newParts.map((part, partIndex) =>
+        oldParts[partIndex] && samePart(oldParts[partIndex], part)
+          ? oldParts[partIndex]
+          : part,
+      );
+      return content.length === oldParts.length &&
+        content.every((part, i) => part === oldParts[i])
+        ? old
+        : { ...message, content: content as ThreadMessageLike['content'] };
+    });
+    if (
+      next.length === previous.length &&
+      next.every((message, i) => message === previous[i])
+    ) {
+      return previous;
+    }
+    previous = next;
+    return next;
+  };
 }

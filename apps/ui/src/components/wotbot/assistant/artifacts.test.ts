@@ -4,9 +4,14 @@ import test from 'node:test';
 import {
   conversationArtifacts,
   conversationFiles,
+  createConversationFilesSelector,
   latestTurnArtifacts,
 } from './artifacts';
-import { toThreadMessages, type LangChainMessage } from '@/lib/thread-messages';
+import {
+  createThreadMessageConverter,
+  toThreadMessages,
+  type LangChainMessage,
+} from '@/lib/thread-messages';
 import { artifactKey } from '../chat-tool-call-model';
 
 test('latestTurnArtifacts includes and enriches voice-created panels', () => {
@@ -269,4 +274,65 @@ test('conversation files keep only downloadable artifacts, newest first', () => 
     ],
   );
   assert.deepEqual(conversationFiles([]), []);
+});
+
+test('file selector stays stable during text streaming and updates on changed or removed results', () => {
+  const convert = createThreadMessageConverter();
+  const selectFiles = createConversationFilesSelector();
+  const history: LangChainMessage[] = [
+    { type: 'human', id: 'h1', content: 'Export' },
+    {
+      type: 'ai',
+      id: 'a1',
+      tool_calls: [{ id: 'c1', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'c1',
+      content: {
+        artifacts: [
+          { kind: 'file', id: 'file-1', ref: 'file_1', filename: 'data.csv' },
+        ],
+      },
+    },
+    { type: 'ai', id: 'a2', content: 'Saved' },
+  ];
+  const first = selectFiles(convert(history));
+  assert.equal(first.length, 1);
+  const streamed = convert([
+    ...history.slice(0, -1),
+    { ...history.at(-1), content: 'Saved the file.' },
+  ]);
+  assert.strictEqual(selectFiles(streamed), first);
+  assert.strictEqual(selectFiles(streamed), first);
+  const changed = selectFiles(
+    convert([
+      ...history.slice(0, 2),
+      {
+        ...history[2],
+        content: {
+          artifacts: [
+            {
+              kind: 'file',
+              id: 'file-1',
+              ref: 'file_1',
+              filename: 'renamed.csv',
+              expires_at: '2026-09-15T14:00:00Z',
+            },
+          ],
+        },
+      },
+    ]),
+  );
+  assert.notStrictEqual(changed, first);
+  assert.equal(changed[0].artifact.filename, 'renamed.csv');
+  assert.equal(changed[0].artifact.expires_at, '2026-09-15T14:00:00Z');
+  assert.deepEqual(selectFiles(convert(history.slice(0, 2))), []);
+  assert.equal(selectFiles(convert(history)).length, 1);
+  assert.deepEqual(
+    selectFiles(
+      convert([...history.slice(0, 2), { ...history[2], status: 'error' }]),
+    ),
+    [],
+  );
 });

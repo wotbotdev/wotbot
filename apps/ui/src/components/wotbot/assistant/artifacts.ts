@@ -4,6 +4,7 @@ import {
   artifactKey,
   normalizeRunCodeResult,
   type RunCodeArtifact,
+  type RunCodeResult,
 } from '@/components/wotbot/chat-tool-call-model';
 import {
   enrichArtifactForPinning,
@@ -33,6 +34,14 @@ export function messageAnchor(messageId: string): string {
 export function conversationArtifacts(
   messages: readonly ThreadMessageLike[],
 ): ConversationArtifact[] {
+  return collectConversationArtifacts(messages, normalizeRunCodeResult, true);
+}
+
+function collectConversationArtifacts(
+  messages: readonly ThreadMessageLike[],
+  readCodeResult: typeof normalizeRunCodeResult,
+  includeWeb: boolean,
+): ConversationArtifact[] {
   const entries: ConversationArtifact[] = [];
   const seen = new Set<string>();
   for (const message of messages) {
@@ -52,9 +61,9 @@ export function conversationArtifacts(
         continue;
       let artifacts: LiveModeArtifact[] = [];
       if (part.toolName === 'run_code') {
-        const result = normalizeRunCodeResult(part.result);
+        const result = readCodeResult(part.result);
         if (!result.error) artifacts = result.artifacts ?? [];
-      } else if (part.toolName === 'create_web_interface') {
+      } else if (includeWeb && part.toolName === 'create_web_interface') {
         const result = normalizeWebInterfaceResult(part.result);
         if (result.artifact && !result.error) {
           artifacts = [
@@ -81,9 +90,50 @@ export function conversationArtifacts(
 export function conversationFiles(
   messages: readonly ThreadMessageLike[],
 ): ConversationFile[] {
-  return conversationArtifacts(messages).filter(
+  return collectConversationFiles(messages, normalizeRunCodeResult);
+}
+
+function collectConversationFiles(
+  messages: readonly ThreadMessageLike[],
+  readCodeResult: typeof normalizeRunCodeResult,
+): ConversationFile[] {
+  return collectConversationArtifacts(messages, readCodeResult, false).filter(
     (entry): entry is ConversationFile => entry.artifact.kind === 'file',
   );
+}
+
+/** Keep the file popover out of token updates that do not change its contents. */
+export function createConversationFilesSelector() {
+  const results = new WeakMap<object, RunCodeResult>();
+  let previousMessages: readonly ThreadMessageLike[] | undefined;
+  let previous: ConversationFile[] = [];
+
+  const readCodeResult: typeof normalizeRunCodeResult = (result) => {
+    if (!result || typeof result !== 'object')
+      return normalizeRunCodeResult(result);
+    let parsed = results.get(result);
+    if (!parsed) {
+      parsed = normalizeRunCodeResult(result);
+      results.set(result, parsed);
+    }
+    return parsed;
+  };
+
+  return (messages: readonly ThreadMessageLike[]): ConversationFile[] => {
+    if (messages === previousMessages) return previous;
+    const next = collectConversationFiles(messages, readCodeResult);
+    previousMessages = messages;
+    if (
+      next.length !== previous.length ||
+      next.some(
+        (entry, i) =>
+          entry.messageId !== previous[i].messageId ||
+          entry.artifact !== previous[i].artifact,
+      )
+    )
+      previous = next;
+    return previous;
+  };
 }
 
 /**

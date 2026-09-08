@@ -2,7 +2,7 @@
 
 import { useAuiState } from '@assistant-ui/react';
 import { MessageSquare, Paperclip } from 'lucide-react';
-import { useMemo, useRef, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/popover';
 import { artifactKey } from '@/components/wotbot/chat-tool-call-model';
 import { FileArtifactCard } from '@/components/wotbot/chat-tool-calls/file-artifact-card';
-import { conversationFiles, messageAnchor } from './artifacts';
+import { createConversationFilesSelector, messageAnchor } from './artifacts';
 
 /**
  * Downloadable files produced anywhere in the conversation.
@@ -23,9 +23,9 @@ import { conversationFiles, messageAnchor } from './artifacts';
  * away from and wanted again later, and the only ones that outlive the turn
  * long enough for a standalone list to be honest about availability.
  */
-export function ConversationFiles() {
-  const messages = useAuiState((state) => state.thread.messages);
-  const files = useMemo(() => conversationFiles(messages), [messages]);
+export const ConversationFiles = memo(function ConversationFiles() {
+  const selectFiles = useMemo(() => createConversationFilesSelector(), []);
+  const files = useAuiState((state) => selectFiles(state.thread.messages));
   const [open, setOpen] = useState(false);
   // Radix restores focus to the trigger on close, which would scroll the
   // message we just jumped to back out of view; the jump waits for that.
@@ -81,4 +81,4 @@ export function ConversationFiles() {
       </PopoverContent>
     </Popover>
   );
-}
+});

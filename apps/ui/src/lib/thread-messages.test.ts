@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   ARTIFACT_VIEW_NAME,
   WOT_SUMMARY_NAME,
+  createThreadMessageConverter,
   toThreadMessages,
   type LangChainMessage,
 } from './thread-messages';
@@ -488,4 +489,100 @@ test('a tool call with no id is skipped rather than left unanswerable', () => {
     groupCalls(out[0]).map((call) => call.id),
     ['b'],
   );
+});
+
+test('streaming preserves completed messages, tool results and unchanged active parts', () => {
+  const convert = createThreadMessageConverter();
+  const history: LangChainMessage[] = [
+    { type: 'human', id: 'h1', content: 'First question' },
+    { type: 'ai', id: 'a1', content: 'First answer' },
+    { type: 'human', id: 'h2', content: 'Export readings' },
+    {
+      type: 'ai',
+      id: 'a2',
+      tool_calls: [{ id: 'c', name: 'run_code', args: { code: 'export()' } }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'c',
+      content:
+        '{"stdout":"Exported","artifacts":[{"kind":"file","ref":"file_1","filename":"readings.csv","id":"file-1"}]}',
+    },
+    { type: 'ai', id: 'a3', content: 'Saved' },
+  ];
+  const first = convert(history);
+  assert.strictEqual(convert([...history]), first);
+  const next = convert([
+    ...history.slice(0, -1),
+    { ...history.at(-1), content: 'Saved the readings.' },
+  ]);
+  for (let i = 0; i < 3; i++) assert.strictEqual(next[i], first[i]);
+  assert.notStrictEqual(next[3], first[3]);
+  assert.strictEqual(parts(next[3])[0], parts(first[3])[0]);
+  assert.strictEqual(parts(next[3])[1], parts(first[3])[1]);
+  assert.strictEqual(
+    groupCalls(next[3])[0].result,
+    groupCalls(first[3])[0].result,
+  );
+  assert.equal(parts(first[3]).at(-1)?.text, 'Saved');
+});
+
+test('cached conversion matches fresh conversion through streaming, edits, recovery and late results', () => {
+  const convert = createThreadMessageConverter();
+  const history: LangChainMessage[] = [
+    { type: 'system', id: 's1', content: 'Run started' },
+    { type: 'human', id: 'h1', content: 'Read a device' },
+    {
+      type: 'ai',
+      id: 'a1',
+      content: [{ type: 'reasoning', text: 'Inspect it' }],
+      tool_calls: [{ id: 'c1', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'c1',
+      status: 'error',
+      content: '{"error":"failed"}',
+    },
+    {
+      type: 'ai',
+      content:
+        '{"type":"wotbot_device_interactions","interactions":[{"type":"read_property","thing_id":"urn:meter","name":"power"}]}',
+    },
+    { type: 'human', id: 'h2', content: 'Next question' },
+    {
+      type: 'ai',
+      id: 'a2',
+      content: 'Answer',
+      additional_kwargs: { reasoning: 'Think first' },
+    },
+    // A late result must update its earlier call without mutating cached state.
+    { type: 'tool', tool_call_id: 'c1', content: '{"stdout":"late result"}' },
+  ];
+  const snapshots = [
+    ...history.map((_, i) => history.slice(0, i + 1)),
+    history.slice(0, 3),
+    [
+      ...history.slice(0, 3),
+      { type: 'tool', tool_call_id: 'c1', content: '{"stdout":"retried"}' },
+    ],
+    structuredClone(history),
+    [
+      { type: 'human', id: 'h1', content: 'Edited question' },
+      ...history.slice(2),
+    ],
+    [],
+    history,
+  ];
+  for (const snapshot of snapshots) {
+    const before = convert(snapshot);
+    const saved = structuredClone(before);
+    assert.deepEqual(before, toThreadMessages(snapshot));
+    convert(history);
+    assert.deepEqual(
+      before,
+      saved,
+      'a later conversion must not mutate an earlier snapshot',
+    );
+  }
 });
