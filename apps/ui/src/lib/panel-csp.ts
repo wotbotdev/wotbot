@@ -19,17 +19,18 @@
  * anywhere the author could read it. Bridge JS is inlined into the document, so
  * 'unsafe-inline' covers it (CSP 'self' would not match the opaque origin).
  */
-const CDN_HOSTS = [
-  'https://cdn.jsdelivr.net',
-  'https://unpkg.com',
-  'https://cdnjs.cloudflare.com',
-  'https://fonts.googleapis.com',
-  'https://fonts.gstatic.com',
-];
 const SCRIPT_CDNS = [
   'https://cdn.jsdelivr.net',
   'https://unpkg.com',
   'https://cdnjs.cloudflare.com',
+  // Plotly's own CDN. Its bundle is the one the docs and every example point
+  // at, so a panel that charts anything reaches for it before the mirrors.
+  'https://cdn.plot.ly',
+];
+const CDN_HOSTS = [
+  ...SCRIPT_CDNS,
+  'https://fonts.googleapis.com',
+  'https://fonts.gstatic.com',
 ];
 // Styles and fonts track the script hosts: a panel may already execute
 // arbitrary JS from these, so a stylesheet from the same host grants strictly

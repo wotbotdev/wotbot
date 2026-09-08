@@ -46,6 +46,7 @@ test('styles and fonts may come from every host scripts may', () => {
     'https://cdn.jsdelivr.net',
     'https://unpkg.com',
     'https://cdnjs.cloudflare.com',
+    'https://cdn.plot.ly',
   ]) {
     assert.ok(directive('script-src').includes(host), `script-src ${host}`);
     assert.ok(directive('style-src').includes(host), `style-src ${host}`);

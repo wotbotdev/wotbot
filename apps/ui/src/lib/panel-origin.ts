@@ -103,7 +103,9 @@ export function isPanelHostname(
   template: string | undefined = configuredTemplate(),
 ): boolean {
   if (isUsableTemplate(template)) {
-    const suffix = template.slice(KEY_TOKEN.length);
+    // The proxy passes a hostname without its port. Templates may carry one for
+    // getPanelOrigin; keeping it here would never match and bypass the guard.
+    const suffix = template.slice(KEY_TOKEN.length).split(':')[0].toLowerCase();
     return hostname !== suffix && hostname.endsWith(suffix);
   }
   return /^[a-z0-9-]+\.panels\./.test(hostname);
