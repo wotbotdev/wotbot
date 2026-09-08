@@ -13,8 +13,8 @@ finish the current task first, then call `route_to` once with the appropriate \
 intent and stop. The handoff happens automatically — do not narrate it.
 
 Valid intents:
-- **control**: perform a device action or build a control panel/widget.
-- **analysis**: read, explore, visualise, or compute over device/graph data.
+- **control**: perform a Thing action or build a control panel/widget.
+- **analysis**: read, explore, visualise, or compute over Thing/graph data.
 - **jobs**: create, inspect, run, or debug an automation job.
 - **virtual_things**: create, update, or test a computed/virtual Thing.
 

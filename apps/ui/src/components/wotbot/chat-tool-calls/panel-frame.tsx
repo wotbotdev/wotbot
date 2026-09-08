@@ -51,7 +51,12 @@ export const PanelFrame = memo(function PanelFrame({
       // it means "your own origin", which is cross-origin to the app. Without
       // it the frame would be opaque-origin and denied every permission-gated
       // API. Preview frames keep scripts disabled entirely.
-      allow={canRunScripts ? 'camera; microphone' : ''}
+      // `xr-spatial-tracking` is what WebXR checks: without it delegated to the
+      // frame, `navigator.xr` reports every session mode unsupported and every
+      // call logs a permissions-policy violation. Delegating it is not a grant
+      // -- entering an immersive session still needs a user gesture and, on
+      // most devices, the browser's own consent prompt.
+      allow={canRunScripts ? 'camera; microphone; xr-spatial-tracking' : ''}
       sandbox={canRunScripts ? 'allow-scripts allow-same-origin' : ''}
       src={src}
       title={title}

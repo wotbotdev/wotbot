@@ -59,6 +59,38 @@ class CreateWebInterfaceToolTestCase(unittest.IsolatedAsyncioTestCase):
         # Title is HTML-escaped to avoid breaking out of the <title> element.
         self.assertIn("Lamp &lt;panel&gt;", wrapped)
 
+    async def test_rejects_a_panel_whose_script_cannot_parse(self) -> None:
+        # The failure this exists for: broken code used to be stored and only
+        # showed up as a console SyntaxError nobody was watching.
+        result = await create_web_interface.ainvoke(
+            {
+                "html": "<div></div><script>foo(bar, baz\nqux();</script>",
+                "capabilities": [{"thing_id": "urn:lamp", "ops": ["readProperty"]}],
+            }
+        )
+
+        self.assertIn("error", result)
+        self.assertIn("does not parse", result["error"])
+        self.assertNotIn("html", self._captured)
+
+    async def test_rejects_a_call_no_declared_capability_permits(self) -> None:
+        result = await create_web_interface.ainvoke(
+            {
+                "html": "<script>wot.writeProperty('urn:other', 'state', 1);</script>",
+                "capabilities": [
+                    {
+                        "thing_id": "urn:lamp",
+                        "affordances": ["state"],
+                        "ops": ["readProperty"],
+                    }
+                ],
+            }
+        )
+
+        self.assertIn("error", result)
+        self.assertIn("urn:other", result["error"])
+        self.assertNotIn("html", self._captured)
+
     async def test_rejects_interface_without_valid_capabilities(self) -> None:
         result = await create_web_interface.ainvoke(
             {

@@ -73,7 +73,11 @@ export const PANEL_CSP = [
   "media-src 'self' blob: data:",
   // Vision and ML libraries run their models in a worker started from a blob.
   "worker-src 'self' blob:",
-  `connect-src ${[...CDN_HOSTS, ...TILE_HOSTS].join(' ')}`,
+  // `blob:` and `data:` are not egress -- both name bytes the panel already
+  // holds, and neither can reach a server. Loaders need them: three.js reads a
+  // .glb's embedded buffers and textures back through fetch() on blob: URLs it
+  // minted itself, so a WebXR or 3D panel fails on its own model without this.
+  `connect-src blob: data: ${[...CDN_HOSTS, ...TILE_HOSTS].join(' ')}`,
   "form-action 'none'",
   "base-uri 'none'",
   "frame-src 'none'",

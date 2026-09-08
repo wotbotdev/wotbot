@@ -76,8 +76,8 @@ The embedded chat is available at `/embed/chat`. It creates an ephemeral chat se
 The route supports initial prompt parameters:
 
 ```text
-/embed/chat?prompt=Show%20the%20living%20room%20lights
-/embed/chat?prompt=Show%20the%20living%20room%20lights&autosubmit=1
+/embed/chat?prompt=Show%20the%20warehouse%20throughput
+/embed/chat?prompt=Show%20the%20warehouse%20throughput&autosubmit=1
 ```
 
 Add `jobEvents=0` to suppress the global job notification event stream
@@ -95,7 +95,7 @@ The route also accepts runtime prefill messages from its parent frame:
 iframe.contentWindow?.postMessage(
   {
     type: 'deck:prefill',
-    prompt: 'Show the living room lights',
+    prompt: 'Show the warehouse throughput',
     submit: true,
   },
   'https://ui.example',

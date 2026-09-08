@@ -193,7 +193,7 @@ class ExecutionEnvironment:
         """Set the human-facing headline for an analysis run.
 
         Lets deterministic analysis code emit a clean, human-readable summary
-        (e.g. "Living room averaged 21 °C") without an LLM. wotbot prefers this
+        (e.g. "Line 3 processed 124 units") without an LLM. wotbot prefers this
         over raw stdout when surfacing the run in toasts and notifications. May be
         called more than once; the messages are joined in order. Reports are
         discarded if the run fails, mirroring artifacts and records.

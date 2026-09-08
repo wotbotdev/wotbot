@@ -17,8 +17,8 @@ test('normalizeWebInterfaceResult parses a stringified web artifact', () => {
           filename: 'abc123.html',
           capabilities: [
             {
-              thingId: 'urn:wotbot:thing:living-room-lamp',
-              affordances: ['brightness', 'on'],
+              thingId: 'urn:wotbot:thing:packaging-conveyor',
+              affordances: ['speed', 'running'],
               ops: ['writeProperty', 'observeProperty', 'bogusOp'],
             },
           ],
@@ -32,8 +32,8 @@ test('normalizeWebInterfaceResult parses a stringified web artifact', () => {
     filename: 'abc123.html',
     capabilities: [
       {
-        thingId: 'urn:wotbot:thing:living-room-lamp',
-        affordances: ['brightness', 'on'],
+        thingId: 'urn:wotbot:thing:packaging-conveyor',
+        affordances: ['speed', 'running'],
         ops: ['writeProperty', 'observeProperty'],
       },
     ],
@@ -94,22 +94,22 @@ test('enrichArtifactForPinning merges html and title from tool args', () => {
 
 const caps = [
   {
-    thingId: 'lamp',
-    affordances: ['brightness'],
+    thingId: 'conveyor',
+    affordances: ['speed'],
     ops: ['writeProperty' as const],
   },
-  { thingId: 'sensor', affordances: [], ops: ['readProperty' as const] },
+  { thingId: 'scanner', affordances: [], ops: ['readProperty' as const] },
 ];
 
 test('isInteractionAllowed enforces thing, op, and affordance', () => {
   // Allowed: exact thing + op + listed affordance.
   assert.equal(
-    isInteractionAllowed(caps, 'writeProperty', 'lamp', 'brightness'),
+    isInteractionAllowed(caps, 'writeProperty', 'conveyor', 'speed'),
     true,
   );
   // Empty affordance list means any affordance on that thing.
   assert.equal(
-    isInteractionAllowed(caps, 'readProperty', 'sensor', 'anything'),
+    isInteractionAllowed(caps, 'readProperty', 'scanner', 'anything'),
     true,
   );
 });
@@ -117,17 +117,17 @@ test('isInteractionAllowed enforces thing, op, and affordance', () => {
 test('isInteractionAllowed rejects out-of-scope interactions', () => {
   // Wrong affordance on a scoped thing.
   assert.equal(
-    isInteractionAllowed(caps, 'writeProperty', 'lamp', 'color'),
+    isInteractionAllowed(caps, 'writeProperty', 'conveyor', 'direction'),
     false,
   );
   // Op not granted.
   assert.equal(
-    isInteractionAllowed(caps, 'invokeAction', 'lamp', 'brightness'),
+    isInteractionAllowed(caps, 'invokeAction', 'conveyor', 'speed'),
     false,
   );
   // Thing not in the allowlist.
   assert.equal(
-    isInteractionAllowed(caps, 'writeProperty', 'front-door-lock', 'locked'),
+    isInteractionAllowed(caps, 'writeProperty', 'robot-arm', 'speed'),
     false,
   );
 });

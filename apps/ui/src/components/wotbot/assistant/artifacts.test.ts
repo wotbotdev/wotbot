@@ -5,7 +5,7 @@ import { latestTurnArtifacts } from './artifacts';
 
 test('latestTurnArtifacts includes and enriches voice-created panels', () => {
   const artifacts = latestTurnArtifacts([
-    { type: 'human', content: 'Build a lamp panel', id: 'human-1' },
+    { type: 'human', content: 'Build a conveyor panel', id: 'human-1' },
     {
       type: 'ai',
       content: '',
@@ -14,8 +14,8 @@ test('latestTurnArtifacts includes and enriches voice-created panels', () => {
           id: 'call-panel',
           name: 'create_web_interface',
           args: {
-            html: '<button>Toggle lamp</button>',
-            title: 'Lamp controls',
+            html: '<button>Pause conveyor</button>',
+            title: 'Conveyor controls',
           },
         },
       ],
@@ -28,11 +28,11 @@ test('latestTurnArtifacts includes and enriches voice-created panels', () => {
           {
             ref: 'ui_1',
             kind: 'web',
-            filename: 'lamp-panel.html',
+            filename: 'conveyor-panel.html',
             capabilities: [
               {
-                thingId: 'urn:lamp',
-                affordances: ['on'],
+                thingId: 'urn:conveyor',
+                affordances: ['running'],
                 ops: ['writeProperty'],
               },
             ],
@@ -40,23 +40,23 @@ test('latestTurnArtifacts includes and enriches voice-created panels', () => {
         ],
       }),
     },
-    { type: 'ai', content: 'The lamp controls are ready.' },
+    { type: 'ai', content: 'The conveyor controls are ready.' },
   ]);
 
   assert.deepEqual(artifacts, [
     {
       ref: 'ui_1',
       kind: 'web',
-      filename: 'lamp-panel.html',
+      filename: 'conveyor-panel.html',
       capabilities: [
         {
-          thingId: 'urn:lamp',
-          affordances: ['on'],
+          thingId: 'urn:conveyor',
+          affordances: ['running'],
           ops: ['writeProperty'],
         },
       ],
-      html: '<button>Toggle lamp</button>',
-      title: 'Lamp controls',
+      html: '<button>Pause conveyor</button>',
+      title: 'Conveyor controls',
     },
   ]);
 });

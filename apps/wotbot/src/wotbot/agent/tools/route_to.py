@@ -33,7 +33,7 @@ def make_route_to_tool() -> Any:
         Call this only when the current task is complete and the user's request
         clearly needs follow-up work handled by a different area:
 
-        - ``control``: perform a device action or build a control panel.
+        - ``control``: perform a Thing action or build a control panel.
         - ``analysis``: read, explore, visualise, or compute over data.
         - ``jobs``: create, inspect, run, or debug an automation job.
         - ``virtual_things``: create, update, or test a computed/virtual Thing.

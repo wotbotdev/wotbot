@@ -90,6 +90,15 @@ test('tile hosts are reachable by fetch, not just by <img>', () => {
   assert.ok(!connectSrc.includes("'self'"));
 });
 
+test('connect-src reaches in-document bytes, which are not egress', () => {
+  // three.js fetches a .glb's embedded buffers and textures back off blob:
+  // URLs it created itself; neither scheme can reach a server.
+  const connectSrc = directive('connect-src');
+
+  assert.ok(connectSrc.includes('blob:'));
+  assert.ok(connectSrc.includes('data:'));
+});
+
 test('panels cannot navigate, post, or nest frames', () => {
   assert.ok(PANEL_CSP.includes("form-action 'none'"));
   assert.ok(PANEL_CSP.includes("base-uri 'none'"));

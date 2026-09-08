@@ -14,8 +14,8 @@ test('parseWotInteractionList reads stringified run_code output', () => {
       wot_calls: [
         {
           type: 'write_property',
-          thing_id: 'urn:wotbot:thing:kitchen-thermometer',
-          name: 'targetTemperature',
+          thing_id: 'urn:wotbot:thing:packaging-conveyor',
+          name: 'targetSpeed',
           ok: true,
           uri_variables: { zone: 'north' },
           value: 22,
@@ -26,9 +26,9 @@ test('parseWotInteractionList reads stringified run_code output', () => {
 
   assert.deepEqual(interactions, [
     {
-      affordanceName: 'targetTemperature',
+      affordanceName: 'targetSpeed',
       ok: true,
-      thingId: 'urn:wotbot:thing:kitchen-thermometer',
+      thingId: 'urn:wotbot:thing:packaging-conveyor',
       type: 'write_property',
       uriVariables: { zone: 'north' },
       value: 22,
@@ -44,8 +44,8 @@ test('parseDeviceInteractionSummaryContent reads graph summary marker content', 
         interactions: [
           {
             type: 'write_property',
-            thingId: 'urn:wotbot:thing:living-room-lamp',
-            affordanceName: 'brightness',
+            thingId: 'urn:wotbot:thing:parcel-sorter',
+            affordanceName: 'throughputLimit',
             ok: true,
             uriVariables: { channel: 1 },
             value: 40,
@@ -55,9 +55,9 @@ test('parseDeviceInteractionSummaryContent reads graph summary marker content', 
     ),
     [
       {
-        affordanceName: 'brightness',
+        affordanceName: 'throughputLimit',
         ok: true,
-        thingId: 'urn:wotbot:thing:living-room-lamp',
+        thingId: 'urn:wotbot:thing:parcel-sorter',
         type: 'write_property',
         uriVariables: { channel: 1 },
         value: 40,

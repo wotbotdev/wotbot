@@ -105,7 +105,7 @@ class CameraContextTestCase(unittest.IsolatedAsyncioTestCase):
         thread_id = "thread-camera-frozen-tool-loop"
         session_id = "session-camera-frozen-tool-loop"
         notifications: list[str | None] = []
-        human = HumanMessage(content="Turn this lamp on", id="turn-1")
+        human = HumanMessage(content="Turn this machine on", id="turn-1")
         media_sessions.set_metadata(session_id, thread_id=thread_id)
         media_sessions.store_video_frame_jpeg(session_id, jpeg_bytes=b"first-frame")
         unregister = snapshot_notifiers.register(thread_id, notifications.append)
@@ -156,7 +156,7 @@ class CameraContextTestCase(unittest.IsolatedAsyncioTestCase):
             first = await attach_latest_camera_frame([first_human], thread_id=thread_id)
             media_sessions.store_video_frame_jpeg(session_id, jpeg_bytes=b"second-frame")
             second = await attach_latest_camera_frame(
-                [first_human, AIMessage(content="It is a lamp."), second_human],
+                [first_human, AIMessage(content="It is a conveyor."), second_human],
                 thread_id=thread_id,
             )
         finally:

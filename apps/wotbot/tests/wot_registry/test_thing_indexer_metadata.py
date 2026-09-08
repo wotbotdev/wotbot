@@ -5,8 +5,8 @@ def test_build_index_metadata_shapes_vector_metadata():
     td_metadata = {
         "id": "urn:thing:alpha",
         "title": "Alpha Sensor",
-        "description": "Kitchen air monitor",
-        "tags": ["kitchen", "sensor"],
+        "description": "Process temperature monitor for assembly line 3",
+        "tags": ["line-3", "sensor"],
         "propertyNames": ["temperature"],
         "actionNames": ["toggle"],
         "eventNames": ["overheated"],
@@ -25,8 +25,8 @@ def test_build_index_metadata_shapes_vector_metadata():
     assert metadata == {
         "id": "urn:thing:alpha",
         "title": "Alpha Sensor",
-        "description": "Kitchen air monitor",
-        "tags": ["kitchen", "sensor"],
+        "description": "Process temperature monitor for assembly line 3",
+        "tags": ["line-3", "sensor"],
         "locationCandidates": [],
         "propertyNames": ["temperature"],
         "actionNames": ["toggle"],

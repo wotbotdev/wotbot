@@ -817,29 +817,29 @@ class VirtualThingCapabilityInferenceTestCase(unittest.TestCase):
         self.assertEqual(grants["urn:dev:meter"].ops, ["readProperty"])
         self.assertEqual(grants["urn:dev:meter"].affordances, ["powerKw"])
 
-    def test_infers_grants_from_literal_sensor_loop(self):
+    def test_infers_grants_from_literal_source_loop(self):
         handler = (
             "def handle(input, state, context):\n"
-            "    SENSORS = [\n"
-            "        ('urn:living-room:thermostat', 'currentTemperature'),\n"
-            "        ('urn:bedroom:thermostat', 'state'),\n"
+            "    SOURCES = [\n"
+            "        ('urn:factory:line-a', 'unitsProduced'),\n"
+            "        ('urn:factory:line-b', 'state'),\n"
             "    ]\n"
-            "    temps = []\n"
-            "    for tid, prop in SENSORS:\n"
-            "        temps.append(wot.read_property(tid, prop))\n"
-            "    return sum(temps) / len(temps)"
+            "    readings = []\n"
+            "    for tid, prop in SOURCES:\n"
+            "        readings.append(wot.read_property(tid, prop))\n"
+            "    return readings"
         )
 
         self.assertEqual(
             infer_capabilities(handler),
             [
                 {
-                    "thing_id": "urn:living-room:thermostat",
+                    "thing_id": "urn:factory:line-a",
                     "ops": ["readProperty"],
-                    "affordances": ["currentTemperature"],
+                    "affordances": ["unitsProduced"],
                 },
                 {
-                    "thing_id": "urn:bedroom:thermostat",
+                    "thing_id": "urn:factory:line-b",
                     "ops": ["readProperty"],
                     "affordances": ["state"],
                 },

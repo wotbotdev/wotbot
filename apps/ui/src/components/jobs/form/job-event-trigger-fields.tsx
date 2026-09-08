@@ -27,7 +27,7 @@ export function JobEventTriggerFields({
         <Input
           value={thingId}
           onChange={(event) => onThingIdChange(event.target.value)}
-          placeholder="urn:dev:ops:thermostat-1"
+          placeholder="urn:logistics:scanner-7"
         />
       </div>
       <div className="space-y-2">
@@ -35,7 +35,7 @@ export function JobEventTriggerFields({
         <Input
           value={eventName}
           onChange={(event) => onEventNameChange(event.target.value)}
-          placeholder="overheat"
+          placeholder="parcelScanned"
         />
       </div>
       <div className="space-y-2 sm:col-span-2">

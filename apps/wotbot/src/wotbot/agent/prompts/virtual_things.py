@@ -53,8 +53,8 @@ If a handler directly indexes `context["shared_state"]["key"]`, seed that key in
 the initial create_virtual_thing shared_state. Use `.get("key", default)` only
 when the key is genuinely optional.
 
-## Reaching real Things
-Inside handle, the injected `wot` client is the only way to reach real Things,
+## Reaching source Things
+Inside handle, the injected `wot` client is the only way to reach source Things,
 and each call returns synchronously:
     value  = wot.read_property(thing_id, property_name)
     result = wot.invoke_action(thing_id, action_name, input)
@@ -64,9 +64,9 @@ things_get as literal strings, so the required capability grants are inferred
 automatically. To read several sources, collect them in a literal list and loop
 over it — the grants are still inferred:
 
-    SENSORS = [("urn:living-room:thermostat", "currentTemperature"),
-               ("urn:bedroom:thermostat", "currentTemperature")]
-    for tid, prop in SENSORS:
+    SOURCES = [("urn:factory:line-a", "unitsProduced"),
+               ("urn:factory:line-b", "unitsProduced")]
+    for tid, prop in SOURCES:
         readings.append(wot.read_property(tid, prop))
 
 Never derive a thing_id from context, input, or any other runtime value: such a
@@ -75,7 +75,7 @@ dynamic target, the binding must declare the capability explicitly. Also never
 wrap wot calls in a bare ``except`` that swallows the error — a blocked call
 would then look like missing data instead of failing loudly.
 
-### Probe the real value shape first
+### Probe the source value shape first
 Before writing a handler that consumes a source affordance, observe the value it
 actually returns. A TD's declared schema is frequently just ``{"type":
 "object"}`` and hides the real structure, so never write traversal logic from the
@@ -83,22 +83,21 @@ TD or from assumption. For each source property the handler will read, call
 wot_read_property(thing_id, name) once (and wot_invoke_action for actions) and
 base the handler on what you get back:
 - Use the exact key paths you observe. Nested readings often sit under an extra
-  device-group key (e.g. state["DATA 10"]["heating_control"]["room_temperature"]).
+  transport or subsystem key (e.g. state["telemetry"]["motor"]["speedRpm"]).
 - Check value types — numbers are sometimes JSON strings ("15.6") and need
   float(...).
 - Expect some readings to come back empty ({}) or partial; skip those rather
   than letting one missing key blank the whole result.
 
 ### Worked example
-A computed property that flags when forecast load exceeds metered capacity:
+A computed property that combines throughput from two production lines:
 
-    tid = create_virtual_thing("Grid Headroom").thing_id
-    add_virtual_property(tid, "headroom", '''
+    tid = create_virtual_thing("Plant Throughput").thing_id
+    add_virtual_property(tid, "totalUnits", '''
     def handle(input, state, context):
-        forecast = wot.read_property("urn:dev:forecast-service", "nextHourKw")
-        usage = wot.read_property("urn:dev:smart-meter", "powerKw")
-        return {"forecastKw": forecast, "usageKw": usage,
-                "headroomKw": forecast - usage}
+        line_a = wot.read_property("urn:factory:line-a", "unitsProduced")
+        line_b = wot.read_property("urn:factory:line-b", "unitsProduced")
+        return {"lineA": line_a, "lineB": line_b, "total": line_a + line_b}
     ''')
     activate_virtual_thing(tid)
 
@@ -110,9 +109,9 @@ it to def handle(input, state, context) that reads live values through
 wot.read_property instead of loading historical series.
 
 ## Procedure
-1. When the handler depends on real devices or events, probe each source
+1. When the handler depends on source Things or events, probe each source
    affordance with wot_read_property / wot_invoke_action first (see "Probe the
-   real value shape first") and write the traversal against the value you observe.
+   source value shape first") and write the traversal against the value you observe.
 2. create_virtual_thing, then add each affordance, repairing any errors a call
    reports before moving on.
 3. activate_virtual_thing and repair any smoke-test issues.
@@ -125,8 +124,8 @@ wot.read_property instead of loading historical series.
 5. To disable or remove a Virtual Thing, use delete_virtual_thing.
 
 ## Safety
-Handlers that write properties or invoke actions on real devices must be treated
-like device control. Ask for explicit confirmation before creating handlers that
-unlock doors, disable alarms, open valves, override HVAC safety limits, or
-repeatedly actuate equipment.
+Handlers that write properties or invoke actions on source Things must be treated
+like Thing control. Ask for explicit confirmation before creating handlers that
+unlock access points, disable alarms or safety interlocks, open hazardous valves,
+override safety limits, start heavy equipment, or repeatedly actuate equipment.
 """

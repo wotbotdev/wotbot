@@ -126,8 +126,8 @@ async def create_prompt_job(
     """Create a prompt automation job that runs natural-language instructions.
 
     run_instructions is the instruction the background worker will execute later.
-    For example, if the user says "create a job to check the house every hour",
-    pass run_instructions="Check the house."
+    For example, if the user says "create a job to check the production queue every hour",
+    pass run_instructions="Check the production queue."
 
     trigger_kind:
     - "time": use run_at (ISO datetime), interval_seconds, or cron_expression

@@ -63,10 +63,10 @@ test('getEmbedInitialPrefillFromSearchParams parses prompt and autosubmit', () =
   assert.deepEqual(
     getEmbedInitialPrefillFromSearchParams({
       autosubmit: '1',
-      prompt: '  Show the lights  ',
+      prompt: '  Show fleet status  ',
     }),
     {
-      prompt: 'Show the lights',
+      prompt: 'Show fleet status',
       submit: true,
     },
   );
@@ -85,10 +85,10 @@ test('embed search params omit removed example flag only', () => {
       autosubmit: '1',
       examples: '0',
       jobEvents: '0',
-      prompt: 'Show the lights',
+      prompt: 'Show fleet status',
       theme: 'dark',
     }),
-    'autosubmit=1&jobEvents=0&prompt=Show+the+lights&theme=dark',
+    'autosubmit=1&jobEvents=0&prompt=Show+fleet+status&theme=dark',
   );
 });
 

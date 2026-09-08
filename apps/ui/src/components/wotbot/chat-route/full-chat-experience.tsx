@@ -144,7 +144,7 @@ function ChatStream({
         placeholder={
           pendingSlot
             ? 'Answer the request above to continue...'
-            : 'Ask about your devices, routines, or home...'
+            : 'Ask about your Things, data, or automations...'
         }
         rerunConfirmation={rerunConfirmation}
       />

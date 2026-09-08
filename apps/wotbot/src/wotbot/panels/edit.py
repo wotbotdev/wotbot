@@ -3,7 +3,7 @@
 Runs a focused turn of the foreground agent graph, seeded with the panel's
 current HTML + capabilities and the user's natural-language instruction, and
 extracts the updated panel from the agent's ``create_web_interface`` call. The
-agent can discover new devices (things_search / wot_get_*) when the edit needs
+agent can discover new Things (things_search / wot_get_*) when the edit needs
 an affordance the panel doesn't already use, and it re-declares the capability
 allowlist for the new version.
 """
@@ -18,16 +18,16 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 _EDIT_INSTRUCTIONS = """\
-You are updating an existing device control panel (an interactive HTML/JS
+You are updating an existing Thing control panel (an interactive HTML/JS
 mini-interface). Apply the requested change, then emit the COMPLETE updated panel
 using the create_web_interface tool — re-declaring every capability the updated
 panel uses. Make the smallest change that satisfies the request and keep the rest
-of the panel intact. If the change needs a device or affordance the panel does not
+of the panel intact. If the change needs a Thing or affordance the panel does not
 already use, discover it first (things_search, wot_get_property, wot_get_action).
 Panel JavaScript must treat window.wot.readProperty/writeProperty/invokeAction
-results as decoded device values directly. Do not access transport wrapper
+results as decoded Thing values directly. Do not access transport wrapper
 fields like result, payload, completed_result, or payload.data unless those
-fields are explicitly part of the inspected device value schema.
+fields are explicitly part of the inspected Thing value schema.
 Binary values come back as `{{ kind: "binary", contentType, bodyBase64,
 sizeBytes }}`; use window.wot.binaryToBlob, binaryToObjectUrl, or binaryToBytes
 instead of reading transport envelopes.

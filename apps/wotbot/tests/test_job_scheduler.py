@@ -203,7 +203,7 @@ class JobSchedulerTestCase(unittest.IsolatedAsyncioTestCase):
         result = await job_scheduler.create_prompt_job.ainvoke(
             {
                 "name": "demo job",
-                "run_instructions": "check the house",
+                "run_instructions": "check the production queue",
                 "trigger_kind": "time",
                 "schedule_kind": "interval",
                 "interval_seconds": 10,
@@ -227,7 +227,7 @@ class JobSchedulerTestCase(unittest.IsolatedAsyncioTestCase):
         result = await job_scheduler.create_prompt_job.ainvoke(
             {
                 "name": "weekly check",
-                "run_instructions": "Check the house.",
+                "run_instructions": "Check the production queue.",
                 "trigger_kind": "time",
                 "schedule_kind": "cron",
                 "cron_expression": "0 9 * * sun",

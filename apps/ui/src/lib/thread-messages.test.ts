@@ -243,7 +243,12 @@ test('renders a device-interaction summary as its own part', () => {
   const summary = JSON.stringify({
     type: 'wotbot_device_interactions',
     interactions: [
-      { affordanceName: 'on', ok: true, thingId: 'lamp', type: 'property' },
+      {
+        affordanceName: 'running',
+        ok: true,
+        thingId: 'conveyor',
+        type: 'property',
+      },
     ],
   });
   const out = toThreadMessages([{ type: 'ai', content: summary, id: 'a1' }]);
@@ -416,7 +421,12 @@ test('the summary does not push artifacts past the answer', () => {
       content: JSON.stringify({
         type: 'wotbot_device_interactions',
         interactions: [
-          { affordanceName: 'on', ok: true, thingId: 'lamp', type: 'property' },
+          {
+            affordanceName: 'running',
+            ok: true,
+            thingId: 'conveyor',
+            type: 'property',
+          },
         ],
       }),
     },
@@ -440,7 +450,7 @@ test('each artifact sits with the run that produced it', () => {
     { type: 'tool', tool_call_id: 'a', content: '{"artifact":{"id":"art-a"}}' },
     {
       type: 'ai',
-      content: 'The panel above shows the lamp.',
+      content: 'The panel above shows the conveyor.',
       tool_calls: [{ id: 'b', name: 'create_web_interface', args: {} }],
     },
     { type: 'tool', tool_call_id: 'b', content: '{"artifact":{"id":"art-b"}}' },

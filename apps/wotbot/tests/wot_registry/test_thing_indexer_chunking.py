@@ -7,9 +7,9 @@ from wotbot.thing_indexer.chunking import (
 def _make_td_metadata(**overrides):
     base = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
-        "description": "Kitchen air monitor",
-        "tags": ["kitchen", "sensor"],
+        "title": "Line 3 Temperature Monitor",
+        "description": "Process temperature monitor for assembly line 3",
+        "tags": ["line-3", "sensor"],
         "propertyNames": ["temperature"],
         "actionNames": [],
         "eventNames": [],
@@ -21,7 +21,7 @@ def _make_td_metadata(**overrides):
 def test_build_chunk_content_includes_summary():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
     }
     content = build_chunk_content(thing_td, "device summary")
     assert "device summary" in content
@@ -30,7 +30,7 @@ def test_build_chunk_content_includes_summary():
 def test_build_chunk_content_includes_properties():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
         "properties": {
             "temperature": {
                 "type": "number",
@@ -49,7 +49,7 @@ def test_build_chunk_content_includes_properties():
 def test_build_chunk_content_includes_actions():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
         "actions": {
             "calibrate": {
                 "description": "Calibrate the sensor",
@@ -66,7 +66,7 @@ def test_build_chunk_content_includes_actions():
 def test_build_chunk_content_includes_events():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
         "events": {
             "overheated": {"description": "Sensor overheated"},
         },
@@ -79,7 +79,7 @@ def test_build_chunk_content_includes_events():
 def test_build_chunk_content_includes_enriched_semantic_types():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
         "@type": ["saref:TemperatureSensor", "http://www.w3.org/ns/sosa/Sensor"],
         "properties": {
             "temperature": {
@@ -100,7 +100,7 @@ def test_build_chunk_content_includes_enriched_semantic_types():
 def test_build_chunk_content_without_semantic_types_is_unchanged():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
         "properties": {"humidity": {"type": "number"}},
     }
     content = build_chunk_content(thing_td, "device summary")
@@ -111,7 +111,7 @@ def test_build_chunk_content_without_semantic_types_is_unchanged():
 def test_generate_chunk_returns_single_entry():
     thing_td = {
         "id": "urn:thing:alpha",
-        "title": "Kitchen Air Monitor",
+        "title": "Line 3 Temperature Monitor",
         "properties": {
             "temperature": {"type": "number", "description": "Ambient temperature"},
             "humidity": {"type": "number", "description": "Relative humidity"},

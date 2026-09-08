@@ -6,6 +6,7 @@ from wotbot.agent.prompts import (
     JOBS_PROMPT,
     RESPOND_PROMPT,
     ROUTER_PROMPT,
+    VIRTUAL_THINGS_PROMPT,
 )
 
 
@@ -30,7 +31,7 @@ class AnalysisGuidanceTestCase(unittest.TestCase):
         self.assertIn("get_current_time", ANALYSIS_PROMPT)
 
     def test_analysis_prompt_describes_breakdown_workflow(self) -> None:
-        self.assertIn("matching analysis services for that household", ANALYSIS_PROMPT)
+        self.assertIn("same asset, process, fleet, dataset", ANALYSIS_PROMPT)
         self.assertIn("stacked area chart", ANALYSIS_PROMPT)
 
     def test_analysis_prompt_describes_typical_workflow(self) -> None:
@@ -47,7 +48,7 @@ class AnalysisGuidanceTestCase(unittest.TestCase):
         self.assertIn("use wot_read_property directly", ANALYSIS_PROMPT)
 
     def test_analysis_prompt_requires_confirmation_before_writes(self) -> None:
-        self.assertIn("treat it as device", ANALYSIS_PROMPT)
+        self.assertIn("treat it as Thing", ANALYSIS_PROMPT)
         self.assertIn("ask for explicit", ANALYSIS_PROMPT)
 
     def test_analysis_prompt_explains_sparql_tool_choice(self) -> None:
@@ -56,8 +57,34 @@ class AnalysisGuidanceTestCase(unittest.TestCase):
         self.assertIn("things_sparql", ANALYSIS_PROMPT)
         self.assertIn("read-only SPARQL", ANALYSIS_PROMPT)
         self.assertIn("local Thing graph", ANALYSIS_PROMPT)
+        self.assertIn("describe_rdf_schema", ANALYSIS_PROMPT)
         self.assertIn("wot.invoke_action", ANALYSIS_PROMPT)
         self.assertIn("sparqlQuery", ANALYSIS_PROMPT)
+
+    def test_active_prompts_do_not_assume_a_home_context(self) -> None:
+        combined = "\n".join(
+            [
+                ROUTER_PROMPT,
+                RESPOND_PROMPT,
+                CONTROL_PROMPT,
+                ANALYSIS_PROMPT,
+                JOBS_PROMPT,
+                VIRTUAL_THINGS_PROMPT,
+            ]
+        ).casefold()
+
+        for phrase in (
+            "household",
+            "their home",
+            "interface for the home",
+            "living room",
+            "bedroom",
+            "kitchen",
+            "thermostat",
+            "hvac",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertNotIn(phrase, combined)
 
     def test_analysis_prompt_describes_panel_binary_payloads(self) -> None:
         self.assertIn("Binary values", ANALYSIS_PROMPT)
@@ -67,7 +94,8 @@ class AnalysisGuidanceTestCase(unittest.TestCase):
 class ControlGuidanceTestCase(unittest.TestCase):
     def test_control_prompt_requires_confirmation_for_safety_critical(self) -> None:
         self.assertIn("explicit confirmation", CONTROL_PROMPT)
-        self.assertIn("unlocking doors", CONTROL_PROMPT)
+        self.assertIn("safety interlocks", CONTROL_PROMPT)
+        self.assertIn("heavy equipment", CONTROL_PROMPT)
 
     def test_control_prompt_describes_confirm_then_proceed_flow(self) -> None:
         self.assertIn("until the user confirms", CONTROL_PROMPT)
@@ -92,7 +120,8 @@ class ControlGuidanceTestCase(unittest.TestCase):
 
 class RespondGuidanceTestCase(unittest.TestCase):
     def test_respond_prompt_forbids_inventing_runtime_state(self) -> None:
-        self.assertIn("Never invent current device state", RESPOND_PROMPT)
+        self.assertIn("Web of Things assistant", RESPOND_PROMPT)
+        self.assertIn("Never invent current Thing state", RESPOND_PROMPT)
 
 
 class JobGuidanceTestCase(unittest.TestCase):

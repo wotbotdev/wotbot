@@ -35,7 +35,7 @@ test('shows actions for an answer that used tools', () => {
       state([
         { type: 'reasoning', text: 'checking' },
         { type: 'tool-call' },
-        { type: 'text', text: 'The light is on.' },
+        { type: 'text', text: 'The conveyor is running.' },
       ]),
     ),
     true,
@@ -137,7 +137,7 @@ test('retry counts successful writes and actions across the complete user turn',
     {
       id: 'user-1',
       role: 'user',
-      content: [{ type: 'text', text: 'Set up the room' }],
+      content: [{ type: 'text', text: 'Configure the production line' }],
     },
     {
       id: 'tools-1',

@@ -87,7 +87,7 @@ export function JobCreatePage() {
           <Input
             value={form.name}
             onChange={(event) => setField('name', event.target.value)}
-            placeholder="Morning energy summary"
+            placeholder="Daily operations summary"
           />
         </div>
       </JobFormCard>
