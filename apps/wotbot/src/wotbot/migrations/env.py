@@ -12,7 +12,11 @@ from wotbot.core.orm import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep the loggers the application configured before running migrations.
+    # fileConfig disables every existing logger by default, and alembic.ini
+    # pins root at WARN -- so a migration on startup silenced wotbot, httpx,
+    # openai and langgraph for the life of the process.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 
 def _import_models_for_metadata() -> None:
