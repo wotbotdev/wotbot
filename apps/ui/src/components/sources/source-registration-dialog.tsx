@@ -255,9 +255,19 @@ export function SourceRegistrationDialog({
         });
         return;
       }
+      const onboarding = result.onboarding;
+      if (result.credential_challenge) {
+        // Registration is not finished yet, so say nothing: the credential
+        // prompt is the next step, and the resubmit behind it reports the
+        // real outcome. Leave this dialog mounted so that resubmit has
+        // somewhere to show its progress.
+        credentialSaved.current = false;
+        setPendingSource(result.source);
+        setCredentialChallenge(result.credential_challenge);
+        return;
+      }
       // One toast for one outcome: a source that saved but could not onboard
       // its Thing is a warning, not a success followed by a warning.
-      const onboarding = result.onboarding;
       if (onboarding?.thing) {
         toast.success(
           `Source saved. ${onboarding.thing.title} is ready in Things.`,
@@ -267,17 +277,8 @@ export function SourceRegistrationDialog({
       } else {
         toast.success(editing ? 'Source updated' : 'Source registered');
       }
-      if (result.credential_challenge) {
-        // Leave this dialog mounted behind the credential prompt so the
-        // resubmit that follows a saved credential has somewhere to show
-        // its progress.
-        credentialSaved.current = false;
-        setPendingSource(result.source);
-        setCredentialChallenge(result.credential_challenge);
-      } else {
-        onOpenChange(false);
-        onRegistered(result.source, onboarding);
-      }
+      onOpenChange(false);
+      onRegistered(result.source, onboarding);
     } catch (error) {
       setFormError({
         message:

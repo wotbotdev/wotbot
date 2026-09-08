@@ -71,6 +71,22 @@ export async function setCached(key: string, response: CachedResponse, payloadSi
   }
 }
 
+/**
+ * Drops a cached entry, so a response that later proves unusable does not keep
+ * being served for the rest of its TTL.
+ */
+export async function deleteCached(key: string): Promise<void> {
+  if (!config.cacheEnabled) return;
+
+  try {
+    const client = await getValkeyClient();
+    await client.del(key);
+    log.debug(`Cache delete: ${key}`);
+  } catch (error) {
+    log.warn(`Cache delete error: ${formatError(error)}`);
+  }
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }

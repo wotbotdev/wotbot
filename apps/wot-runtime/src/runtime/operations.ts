@@ -1,7 +1,7 @@
 import log from '../logger/index.js';
 import { annotateThingDescriptionSecurityNames } from '../runtime/credentials.js';
 import { ensureWotReady, getServient, getWotClient } from '../runtime/servient.js';
-import { buildCacheKey, getCached, setCached } from '../services/cache.js';
+import { buildCacheKey, deleteCached, getCached, setCached } from '../services/cache.js';
 import { fetchThingDescription, type ThingDescription } from '../services/thing-catalog-client.js';
 import {
   decodePayloadEnvelope,
@@ -404,12 +404,26 @@ export async function handleInvokeAction(request: any): Promise<any> {
     const cached = await getCached(cacheKey);
     if (cached) {
       const body = Buffer.from(cached.payload, 'base64');
-      rejectHtmlPayload(body, cached.contentType);
-      log.info(`Cache hit for invokeAction '${thingId}/${actionName}'`);
-      return {
-        completedResult: buildEncodedInteractionResponse({ body, contentType: cached.contentType }, cached.contentType)
-          .response,
-      };
+      // Entries written before this check existed can hold an HTML error page
+      // under a JSON content type. Evict and re-fetch rather than serving the
+      // same 502 for the rest of the TTL.
+      let usable = true;
+      try {
+        rejectHtmlPayload(body, cached.contentType);
+      } catch {
+        usable = false;
+        log.warn(`Discarding unusable cached response for '${thingId}/${actionName}'`);
+        await deleteCached(cacheKey);
+      }
+      if (usable) {
+        log.info(`Cache hit for invokeAction '${thingId}/${actionName}'`);
+        return {
+          completedResult: buildEncodedInteractionResponse(
+            { body, contentType: cached.contentType },
+            cached.contentType,
+          ).response,
+        };
+      }
     }
   }
 

@@ -237,7 +237,11 @@ class OpenApiProvider(DiscoveryProvider):
             declared = declared_spec_url(response) if allow_follow else None
             if declared is not None:
                 context.note(f"{response.url} declares its API description at {declared}")
-                return await self._probe_specification(context, declared, allow_follow=False)
+                found = await self._probe_specification(context, declared, allow_follow=False)
+                if found is not None:
+                    return found
+                # A declared URL is only a hint scraped from the page, so a bad
+                # one must not shadow the conventional paths probed below.
         elif response.status not in {404, 405}:
             return None
 

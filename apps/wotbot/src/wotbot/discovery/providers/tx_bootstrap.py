@@ -8,6 +8,7 @@ own management API.
 
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any
@@ -37,6 +38,8 @@ from wotbot.discovery.providers.edc_v3 import (
     edc_api_description,
 )
 from wotbot.discovery.search import rank_candidates
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +110,18 @@ class TxBootstrapProvider(EdcV3Provider):
                     "tx-bootstrap federated catalog returned an invalid dataset page"
                 )
             for value in payload["items"]:
-                entry = self._parse_entry(value)
+                try:
+                    entry = self._parse_entry(value)
+                except SourceProtocolError:
+                    # A federated catalog aggregates other participants, so one
+                    # of them publishing a stale or partial entry is an expected
+                    # state. Skip that entry rather than failing the search over
+                    # the whole dataspace.
+                    logger.info(
+                        "Skipping unusable tx-bootstrap federated catalog entry",
+                        exc_info=True,
+                    )
+                    continue
                 entries.setdefault(entry.entry_id, entry)
 
         candidates: list[tuple[CandidateDraft, str]] = []

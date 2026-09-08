@@ -269,7 +269,7 @@ export function ThingsList() {
                               {isDiscoveredOrigin(record.origin) ? (
                                 <Badge
                                   variant="outline"
-                                  className="border-blue-300 text-blue-600"
+                                  className="border-blue-500/50 text-blue-600 dark:text-blue-400"
                                 >
                                   Resource ·{' '}
                                   {record.origin.provider || 'Discovered'}

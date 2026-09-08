@@ -81,19 +81,14 @@ function CredentialBadge({ source }: { source: DiscoverySource }) {
 
 export function SourcesList() {
   const pathname = usePathname();
-  const [search, setSearch] = useState(
-    () =>
-      (typeof window === 'undefined'
-        ? ''
-        : new URLSearchParams(window.location.search).get('source')) || '',
-  );
+  const [search, setSearch] = useState('');
   // The `?source=` the rest of the app links with, kept only until its row has
   // been highlighted once, so later searches do not re-trigger the scroll.
-  const [highlightId, setHighlightId] = useState(() =>
-    typeof window === 'undefined'
-      ? ''
-      : new URLSearchParams(window.location.search).get('source') || '',
-  );
+  const [highlightId, setHighlightId] = useState('');
+  // Read in an effect, not during render: `window.location` is still the old
+  // URL while a client-side navigation renders, and `useSearchParams` would
+  // opt this subtree out of hydration on a direct load.
+  const [seeded, setSeeded] = useState(false);
   const deferredSearch = useDeferredValue(search);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<DiscoverySource[]>([]);
@@ -111,14 +106,28 @@ export function SourcesList() {
     useState<DiscoverySource | null>(null);
   const highlightRef = useRef<HTMLTableRowElement | null>(null);
 
+  useEffect(() => {
+    const linked =
+      new URLSearchParams(window.location.search).get('source') || '';
+    if (linked) {
+      setSearch(linked);
+      setHighlightId(linked);
+    }
+    setSeeded(true);
+  }, []);
+
   useEffect(() => setPage(1), [deferredSearch]);
 
   // Keep the query in the URL so a filtered list can be shared and the back
   // button behaves, matching the `?source=` link the list already accepts.
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    // Wait for the seed above, or the first pass would strip the very param it
+    // is about to read.
+    if (!seeded) return;
+    const next = deferredSearch.trim();
     const params = new URLSearchParams(window.location.search);
-    if (deferredSearch.trim()) params.set('source', deferredSearch.trim());
+    if ((params.get('source') || '') === next) return;
+    if (next) params.set('source', next);
     else params.delete('source');
     const query = params.toString();
     window.history.replaceState(
@@ -126,7 +135,7 @@ export function SourcesList() {
       '',
       query ? `${pathname}?${query}` : pathname,
     );
-  }, [deferredSearch, pathname]);
+  }, [deferredSearch, pathname, seeded]);
 
   useEffect(() => {
     void fetchProviderSchemas()

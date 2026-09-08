@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ExternalLink, Pencil, Trash2 } from 'lucide-react';
+import { DatabaseZap, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -120,7 +120,7 @@ export function ThingDetailPageLayout({
             {isDiscoveredOrigin(thing.origin) ? (
               <Badge
                 variant="outline"
-                className="border-blue-300 text-blue-600"
+                className="border-blue-500/50 text-blue-600 dark:text-blue-400"
               >
                 Resource · {thing.origin.provider || 'Discovered'}
               </Badge>
@@ -151,7 +151,7 @@ export function ThingDetailPageLayout({
               <Link
                 href={`/sources?source=${encodeURIComponent(thing.origin.source_id)}`}
               >
-                <ExternalLink className="h-4 w-4" />
+                <DatabaseZap className="h-4 w-4" />
                 View source
               </Link>
             </Button>

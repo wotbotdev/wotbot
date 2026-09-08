@@ -85,7 +85,7 @@ export function ThingSemanticSection({
           {semanticIndexed && indexStatus?.td_hash_match === false ? (
             <Badge
               variant="outline"
-              className="border-yellow-500/60 font-normal text-yellow-700"
+              className="border-yellow-500/60 font-normal text-yellow-700 dark:text-yellow-400"
             >
               Stale snapshot
             </Badge>
@@ -124,7 +124,7 @@ export function ThingSemanticSection({
           )}
 
           {semanticIndexed && indexStatus?.stale ? (
-            <p className="text-sm text-yellow-700">
+            <p className="text-sm text-yellow-700 dark:text-yellow-400">
               The semantic index snapshot is older than the current Thing
               Description and may be out of date.
             </p>

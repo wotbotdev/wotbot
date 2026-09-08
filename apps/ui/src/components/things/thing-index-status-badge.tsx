@@ -39,7 +39,7 @@ export function ThingIndexStatusBadge({
     return (
       <Badge
         variant="secondary"
-        className="gap-1.5 font-normal text-yellow-700"
+        className="gap-1.5 font-normal text-yellow-700 dark:text-yellow-400"
       >
         <Clock className="h-3 w-3" aria-hidden="true" />
         Stale index
