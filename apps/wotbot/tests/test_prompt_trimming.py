@@ -20,6 +20,49 @@ def _tool_call(tool_id: str) -> dict:
 
 
 class PromptTrimmingTestCase(unittest.TestCase):
+    def test_file_download_locators_stay_in_state_but_out_of_model_context(self) -> None:
+        file_summary = {
+            "ref": "file_1",
+            "kind": "file",
+            "filename": "forecast.csv",
+            "mime_type": "text/csv",
+            "size_bytes": 1267,
+            "expires_at": "2026-09-15T14:00:06+00:00",
+        }
+        artifact = {
+            **file_summary,
+            "id": "file-internal.csv",
+            "uri": "wotbot://artifacts/file-internal.csv",
+            "content_uri": "wotbot://artifacts/file-internal.csv/content",
+        }
+        chart = {"ref": "chart_1", "kind": "plotly", "filename": "chart.json"}
+        # File-only executions may have no wot_calls to strip.
+        result = {
+            "ok": True,
+            "stdout": "Saved 10 forecast rows. Source: https://example.com/weather",
+            "artifacts": [artifact, chart],
+        }
+        original = ToolMessage(
+            content=json.dumps(result), name="run_code", tool_call_id="call-1", id="result-1"
+        )
+        messages = [
+            HumanMessage(content="Save the forecast as a CSV"),
+            AIMessage(content="", tool_calls=[_tool_call("call-1")]),
+            original,
+        ]
+
+        trimmed = _trim_conversation(messages, max_tokens=10_000)
+
+        model_result = trimmed[-1]
+        self.assertEqual(
+            json.loads(model_result.content), {**result, "artifacts": [file_summary, chart]}
+        )
+        self.assertEqual(model_result.id, original.id)
+        self.assertEqual(model_result.tool_call_id, original.tool_call_id)
+        self.assertEqual(model_result.name, "run_code")
+        self.assertIs(messages[-1], original)
+        self.assertEqual(json.loads(original.content), result)
+
     def test_trim_conversation_preserves_tool_context(self) -> None:
         """Tool calls and results from all turns should survive trimming."""
         messages = [

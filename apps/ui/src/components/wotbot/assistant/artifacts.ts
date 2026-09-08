@@ -1,3 +1,5 @@
+import type { ThreadMessageLike } from '@assistant-ui/react';
+
 import {
   artifactKey,
   normalizeRunCodeResult,
@@ -12,6 +14,77 @@ import type { LangChainMessage } from '@/lib/thread-messages';
 
 export type LiveModeWebArtifact = WebInterfaceArtifact & { kind: 'web' };
 export type LiveModeArtifact = RunCodeArtifact | LiveModeWebArtifact;
+
+export type ConversationArtifact = {
+  artifact: LiveModeArtifact;
+  messageId: string;
+};
+
+export type ConversationFile = {
+  artifact: RunCodeArtifact & { kind: 'file' };
+  messageId: string;
+};
+
+export function messageAnchor(messageId: string): string {
+  return `message-${encodeURIComponent(messageId)}`;
+}
+
+/** Collect the displayed conversation, keeping each output's original message. */
+export function conversationArtifacts(
+  messages: readonly ThreadMessageLike[],
+): ConversationArtifact[] {
+  const entries: ConversationArtifact[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (
+      message.role !== 'assistant' ||
+      !message.id ||
+      typeof message.content === 'string'
+    ) {
+      continue;
+    }
+    for (const part of message.content) {
+      if (
+        part.type !== 'tool-call' ||
+        part.result === undefined ||
+        part.isError
+      )
+        continue;
+      let artifacts: LiveModeArtifact[] = [];
+      if (part.toolName === 'run_code') {
+        const result = normalizeRunCodeResult(part.result);
+        if (!result.error) artifacts = result.artifacts ?? [];
+      } else if (part.toolName === 'create_web_interface') {
+        const result = normalizeWebInterfaceResult(part.result);
+        if (result.artifact && !result.error) {
+          artifacts = [
+            {
+              ...enrichArtifactForPinning(result.artifact, part.args),
+              kind: 'web',
+            },
+          ];
+        }
+      }
+      // Only original tool calls are indexed; synthetic display parts repeat them.
+      for (const artifact of artifacts) {
+        const key = artifactKey(artifact);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ artifact, messageId: message.id });
+      }
+    }
+  }
+  return entries.reverse();
+}
+
+/** Downloadable files from the whole conversation, newest first. */
+export function conversationFiles(
+  messages: readonly ThreadMessageLike[],
+): ConversationFile[] {
+  return conversationArtifacts(messages).filter(
+    (entry): entry is ConversationFile => entry.artifact.kind === 'file',
+  );
+}
 
 /**
  * Artifacts produced since the last user message.

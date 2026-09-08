@@ -29,6 +29,8 @@ import {
   hasAssistantReloadAction,
   hasAssistantResponseActions,
 } from '@/components/wotbot/assistant/message-actions';
+import { messageAnchor } from '@/components/wotbot/assistant/artifacts';
+import { ConversationFiles } from '@/components/wotbot/assistant/conversation-files';
 import { markdownRemarkPlugins } from '@/components/wotbot/assistant/markdown';
 import { ReasoningPart } from '@/components/wotbot/assistant/reasoning-ui';
 import {
@@ -238,7 +240,11 @@ function AssistantMessage() {
   const messageId = useAuiState((state) => state.message.id ?? '');
 
   return (
-    <MessagePrimitive.Root className="wotbot-message flex w-full flex-col items-start py-2">
+    <MessagePrimitive.Root
+      id={messageAnchor(messageId)}
+      tabIndex={-1}
+      className="wotbot-message flex w-full scroll-mt-3 flex-col items-start rounded-lg py-2 focus-visible:outline-2 focus-visible:outline-ring"
+    >
       <div className="w-full min-w-0 text-foreground">
         <ErrorBoundary
           key={messageId}
@@ -463,6 +469,7 @@ export function WotbotThread({
                 rows={2}
               />
               <div className="flex items-center justify-end gap-2 border-t border-border/80 pt-2">
+                <ConversationFiles />
                 {/* Send and Stop share a slot: the primitives render whichever
                   matches the thread's running state. */}
                 <div className="flex items-center gap-2">

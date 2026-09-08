@@ -32,8 +32,11 @@ async def run_code(code: str, config: RunnableConfig) -> dict:
     Files publish only after successful execution. Results include file metadata
     and expiry; the UI provides downloads. Exports expire after seven days by
     default, charts after one hour; deployment settings can change these limits.
-    Reading does not extend retention. Refer to charts or download filenames
-    naturally; never reconstruct file contents in the conversation.
+    Reading does not extend retention. Refer to charts naturally and to exported
+    files by their human-readable filename and the Download button on their card.
+    Never write artifact download/image links, expose internal artifact URIs, or
+    construct download URLs or paths. Never reconstruct file contents in the
+    conversation.
 
     Failed code may have performed earlier device actions. Inspect the returned
     interactions and current device state before retrying any actions.

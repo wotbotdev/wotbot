@@ -15,7 +15,7 @@ from wotbot.agent.nodes import (
     _prior_analysis_block,
     _resolve_reasoning_effort,
     _sanitize_message_sequence,
-    _strip_wot_calls,
+    _strip_ui_tool_data,
     make_analysis_node,
     make_control_node,
     make_jobs_node,
@@ -236,7 +236,7 @@ class NodeMessageSanitizationTestCase(unittest.TestCase):
         self.assertEqual(len(sanitized[1].tool_calls), 2)
 
 
-class StripWotCallsTestCase(unittest.TestCase):
+class StripUiToolDataTestCase(unittest.TestCase):
     def test_removes_wot_calls_from_json_tool_message(self) -> None:
         import json
 
@@ -248,7 +248,7 @@ class StripWotCallsTestCase(unittest.TestCase):
             }
         )
         msg = ToolMessage(content=original, tool_call_id="call_1")
-        result = _strip_wot_calls(msg)
+        result = _strip_ui_tool_data(msg)
 
         parsed = json.loads(result.content)
         self.assertIn("stdout", parsed)
@@ -257,7 +257,7 @@ class StripWotCallsTestCase(unittest.TestCase):
 
     def test_preserves_non_json_content(self) -> None:
         msg = ToolMessage(content="plain text result", tool_call_id="call_1")
-        result = _strip_wot_calls(msg)
+        result = _strip_ui_tool_data(msg)
         self.assertEqual(result.content, "plain text result")
 
     def test_preserves_json_without_wot_calls(self) -> None:
@@ -265,12 +265,12 @@ class StripWotCallsTestCase(unittest.TestCase):
 
         original = json.dumps({"stdout": "ok", "artifacts": []})
         msg = ToolMessage(content=original, tool_call_id="call_1")
-        result = _strip_wot_calls(msg)
+        result = _strip_ui_tool_data(msg)
         self.assertEqual(result.content, original)
 
     def test_passes_through_non_tool_messages(self) -> None:
         msg = HumanMessage(content="hello")
-        result = _strip_wot_calls(msg)
+        result = _strip_ui_tool_data(msg)
         self.assertIs(result, msg)
 
     def test_does_not_mutate_original_message(self) -> None:
@@ -278,8 +278,21 @@ class StripWotCallsTestCase(unittest.TestCase):
 
         original = json.dumps({"stdout": "x", "wot_calls": [{"type": "read"}]})
         msg = ToolMessage(content=original, tool_call_id="call_1")
-        _strip_wot_calls(msg)
+        _strip_ui_tool_data(msg)
         self.assertIn("wot_calls", msg.content)
+
+    def test_preserves_artifact_fields_from_other_tools(self) -> None:
+        import json
+
+        original = json.dumps(
+            {
+                "artifacts": [
+                    {"kind": "file", "id": "source-1", "uri": "https://example.com/data.csv"}
+                ]
+            }
+        )
+        msg = ToolMessage(content=original, name="wot_invoke_action", tool_call_id="call_1")
+        self.assertIs(_strip_ui_tool_data(msg), msg)
 
 
 class DynamicToolBindingTestCase(unittest.IsolatedAsyncioTestCase):
