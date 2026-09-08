@@ -45,6 +45,9 @@ class DiscoveryProvider(ABC):
     detect_priority: int = 100
     public_max_requests: int = 5
     public_max_bytes: int = 1_048_576
+    # Opt in only when a complete, unfiltered search can identify one service.
+    # A catalog page containing one result does not establish a 1:1 source.
+    auto_onboard_single_result: bool = False
 
     @abstractmethod
     async def search(

@@ -30,9 +30,17 @@ function PromptRow({
 }) {
   return (
     <div className="my-2 flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
-      <span className="text-muted-foreground [&_svg]:size-4">{icon}</span>
-      <span className="flex-1 text-muted-foreground">{message}</span>
-      {action}
+      <span className="shrink-0 text-muted-foreground [&_svg]:size-4">
+        {icon}
+      </span>
+      {/* A draft URL can be arbitrarily long; keep it off the buttons. */}
+      <span
+        className="min-w-0 flex-1 truncate text-muted-foreground"
+        title={message}
+      >
+        {message}
+      </span>
+      <span className="shrink-0">{action}</span>
     </div>
   );
 }
@@ -57,7 +65,7 @@ export function SourceRegistrationPrompt({
 }: {
   draft: SourceDraft;
   onCancel: () => Promise<void>;
-  onRegistered: (sourceId: string) => Promise<void>;
+  onRegistered: (sourceId: string, thingId?: string) => Promise<void>;
 }) {
   // Opens on arrival because the run is blocked on the answer, then stays
   // reopenable from the row if it is dismissed.
@@ -94,7 +102,9 @@ export function SourceRegistrationPrompt({
         open={open}
         onOpenChange={setOpen}
         initialDraft={draft}
-        onRegistered={(source) => run(() => onRegistered(source.source_id))}
+        onRegistered={(source, onboarding) =>
+          run(() => onRegistered(source.source_id, onboarding?.thing?.id))
+        }
       />
     </>
   );

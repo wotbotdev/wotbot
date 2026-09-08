@@ -1,15 +1,25 @@
 'use client';
 
 import {
+  CheckCircle2,
   DatabaseZap,
   KeyRound,
+  Lock,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react';
-import { useCallback, useDeferredValue, useEffect, useState } from 'react';
+import { usePathname } from 'next/navigation';
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { toast } from 'sonner';
 
 import { ConfirmDialog } from '@/components/confirm-dialog';
@@ -17,6 +27,13 @@ import { CredentialDialog } from '@/components/things/thing-detail-credential-di
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -30,7 +47,9 @@ import {
 import { httpClient } from '@/lib/http-client';
 import {
   type DiscoverySource,
+  type ProviderSchema,
   deleteSource,
+  fetchProviderSchemas,
   fetchSources,
 } from '@/lib/sources-api';
 
@@ -38,24 +57,88 @@ import { SourceRegistrationDialog } from './source-registration-dialog';
 
 const PER_PAGE = 12;
 
+function CredentialBadge({ source }: { source: DiscoverySource }) {
+  if (source.credential_status === 'required') {
+    return <Badge variant="destructive">Required</Badge>;
+  }
+  if (source.credential_status === 'configured') {
+    return (
+      <Badge
+        variant="outline"
+        className="gap-1.5 border-emerald-500/50 font-normal text-emerald-700 dark:text-emerald-400"
+      >
+        <CheckCircle2 className="h-3 w-3" />
+        Configured
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="ghost" className="font-normal text-muted-foreground">
+      Not required
+    </Badge>
+  );
+}
+
 export function SourcesList() {
+  const pathname = usePathname();
   const [search, setSearch] = useState(
     () =>
       (typeof window === 'undefined'
         ? ''
         : new URLSearchParams(window.location.search).get('source')) || '',
   );
+  // The `?source=` the rest of the app links with, kept only until its row has
+  // been highlighted once, so later searches do not re-trigger the scroll.
+  const [highlightId, setHighlightId] = useState(() =>
+    typeof window === 'undefined'
+      ? ''
+      : new URLSearchParams(window.location.search).get('source') || '',
+  );
   const deferredSearch = useDeferredValue(search);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<DiscoverySource[]>([]);
   const [total, setTotal] = useState(0);
   const [pending, setPending] = useState(true);
+  const [providerTitles, setProviderTitles] = useState<Record<string, string>>(
+    {},
+  );
   const [registrationOpen, setRegistrationOpen] = useState(false);
   const [editing, setEditing] = useState<DiscoverySource | null>(null);
   const [credentialSource, setCredentialSource] =
     useState<DiscoverySource | null>(null);
+  const [removing, setRemoving] = useState<DiscoverySource | null>(null);
+  const [clearingCredential, setClearingCredential] =
+    useState<DiscoverySource | null>(null);
+  const highlightRef = useRef<HTMLTableRowElement | null>(null);
 
   useEffect(() => setPage(1), [deferredSearch]);
+
+  // Keep the query in the URL so a filtered list can be shared and the back
+  // button behaves, matching the `?source=` link the list already accepts.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (deferredSearch.trim()) params.set('source', deferredSearch.trim());
+    else params.delete('source');
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      query ? `${pathname}?${query}` : pathname,
+    );
+  }, [deferredSearch, pathname]);
+
+  useEffect(() => {
+    void fetchProviderSchemas()
+      .then((schemas: ProviderSchema[]) =>
+        setProviderTitles(
+          Object.fromEntries(
+            schemas.map((schema) => [schema.provider, schema.title]),
+          ),
+        ),
+      )
+      .catch(() => undefined);
+  }, []);
 
   const loadData = useCallback(async () => {
     setPending(true);
@@ -73,6 +156,15 @@ export function SourcesList() {
   }, [deferredSearch, page]);
 
   useEffect(() => void loadData(), [loadData]);
+
+  // Rows render after the fetch resolves, so the browser can never scroll to a
+  // deep-linked source on its own. Do it once the row actually exists.
+  useEffect(() => {
+    if (!highlightId || !highlightRef.current) return;
+    highlightRef.current.scrollIntoView({ block: 'center' });
+    const timer = window.setTimeout(() => setHighlightId(''), 2000);
+    return () => window.clearTimeout(timer);
+  }, [data, highlightId]);
 
   async function handleDelete(source: DiscoverySource) {
     try {
@@ -100,6 +192,9 @@ export function SourcesList() {
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  const hasSearch = Boolean(deferredSearch.trim());
+  const firstVisible = total === 0 ? 0 : (page - 1) * PER_PAGE + 1;
+  const lastVisible = Math.min(page * PER_PAGE, total);
 
   return (
     <div className="space-y-5">
@@ -130,17 +225,23 @@ export function SourcesList() {
 
       <Card className="rounded-md border-border/70 shadow-sm shadow-black/5">
         <CardContent className="space-y-4 p-4 md:p-5">
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="relative w-full max-w-xl">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                aria-label="Search sources"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search sources"
                 className="pl-9"
               />
             </div>
-            <Badge variant="secondary">{total} total</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{total} total</Badge>
+              <Badge variant="outline">
+                Page {page} of {totalPages}
+              </Badge>
+            </div>
           </div>
 
           {pending ? (
@@ -150,128 +251,199 @@ export function SourcesList() {
               ))}
             </div>
           ) : data.length ? (
-            <div className="overflow-x-auto rounded-md border">
-              <Table className="min-w-[960px]">
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Source</TableHead>
-                    <TableHead>Provider</TableHead>
-                    <TableHead>Network</TableHead>
-                    <TableHead>Credentials</TableHead>
-                    <TableHead>Things</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {data.map((source) => (
-                    <TableRow key={source.source_id} id={source.source_id}>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 font-medium">
-                            <DatabaseZap className="h-4 w-4 text-muted-foreground" />
-                            {source.title}
-                          </div>
-                          <p className="line-clamp-2 max-w-xl text-sm text-muted-foreground">
-                            {source.description || source.external_id}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="outline">{source.provider}</Badge>
-                          {source.capabilities.includes('refresh') ? (
-                            <Badge variant="secondary">refresh</Badge>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                      <TableCell>{source.network_access}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            source.credential_status === 'required'
-                              ? 'destructive'
-                              : 'secondary'
+            <>
+              <div className="overflow-x-auto rounded-md border">
+                <Table className="min-w-[860px] table-fixed">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-[34%]">Source</TableHead>
+                      <TableHead className="w-[18%]">Provider</TableHead>
+                      <TableHead className="w-[13%]">Network</TableHead>
+                      <TableHead className="w-[16%]">Credentials</TableHead>
+                      <TableHead className="w-[9%]">Things</TableHead>
+                      <TableHead className="w-[10%] text-right">
+                        Actions
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.map((source) => {
+                      const highlighted = source.source_id === highlightId;
+                      return (
+                        <TableRow
+                          key={source.source_id}
+                          id={source.source_id}
+                          ref={highlighted ? highlightRef : undefined}
+                          className={
+                            highlighted
+                              ? 'bg-primary/5 outline outline-2 -outline-offset-2 outline-primary/40'
+                              : undefined
                           }
                         >
-                          {source.credential_status.replace('_', ' ')}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{source.dependent_thing_count}</TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-2">
-                          {source.security_scheme !== 'nosec' ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setCredentialSource(source)}
-                            >
-                              <KeyRound className="h-3.5 w-3.5" /> Credentials
-                            </Button>
-                          ) : null}
-                          {source.credential_status === 'configured' ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() =>
-                                void handleDeleteCredential(source)
-                              }
-                            >
-                              Clear credential
-                            </Button>
-                          ) : null}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => setEditing(source)}
-                          >
-                            <Pencil className="h-3.5 w-3.5" /> Edit
-                          </Button>
-                          <ConfirmDialog
-                            destructive
-                            confirmLabel="Remove"
-                            description="This removes the source and its stored credentials. Sources with dependent Things cannot be removed."
-                            onConfirm={() => handleDelete(source)}
-                            title={`Remove "${source.title}"?`}
-                            trigger={
-                              <Button size="sm" variant="destructive">
-                                <Trash2 className="h-3.5 w-3.5" /> Remove
-                              </Button>
-                            }
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 font-medium">
+                                <DatabaseZap className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                <span className="min-w-0 truncate">
+                                  {source.title}
+                                </span>
+                              </div>
+                              <p className="line-clamp-2 text-sm text-muted-foreground">
+                                {source.description || source.external_id}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              <Badge variant="outline">
+                                {providerTitles[source.provider] ||
+                                  source.provider}
+                              </Badge>
+                              {source.capabilities.includes('refresh') ? (
+                                <Badge
+                                  variant="secondary"
+                                  className="font-normal"
+                                >
+                                  Refreshable
+                                </Badge>
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {source.network_access === 'private' ? (
+                              <Badge
+                                variant="outline"
+                                className="gap-1.5 border-amber-500/50 font-normal text-amber-700 dark:text-amber-400"
+                              >
+                                <Lock className="h-3 w-3" />
+                                Private
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="ghost"
+                                className="font-normal text-muted-foreground"
+                              >
+                                Public
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <CredentialBadge source={source} />
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {source.dependent_thing_count}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex justify-end">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    aria-label={`Actions for ${source.title}`}
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                  align="end"
+                                  className="w-52"
+                                >
+                                  <DropdownMenuItem
+                                    onSelect={() => setEditing(source)}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" /> Edit
+                                  </DropdownMenuItem>
+                                  {source.security_scheme !== 'nosec' ? (
+                                    <DropdownMenuItem
+                                      onSelect={() =>
+                                        setCredentialSource(source)
+                                      }
+                                    >
+                                      <KeyRound className="h-3.5 w-3.5" />
+                                      {source.credential_status === 'configured'
+                                        ? 'Replace credentials'
+                                        : 'Add credentials'}
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  {source.credential_status === 'configured' ? (
+                                    <DropdownMenuItem
+                                      variant="destructive"
+                                      onSelect={() =>
+                                        setClearingCredential(source)
+                                      }
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" /> Clear
+                                      credentials
+                                    </DropdownMenuItem>
+                                  ) : null}
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    variant="destructive"
+                                    onSelect={() => setRemoving(source)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" /> Remove
+                                    source
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex flex-col gap-3 rounded-md border bg-card px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  Showing {firstVisible}-{lastVisible} of {total} sources
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= totalPages}
+                    onClick={() =>
+                      setPage((value) => Math.min(totalPages, value + 1))
+                    }
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            </>
           ) : (
             <div className="rounded-md border border-dashed px-6 py-12 text-center">
-              <h2 className="text-xl font-semibold">No sources found</h2>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Register a catalog, ToolHive registry, or dataspace endpoint.
+              <h2 className="text-xl font-semibold tracking-tight">
+                No sources found
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+                {hasSearch
+                  ? `No sources match "${deferredSearch.trim()}".`
+                  : 'Register a catalog, ToolHive registry, or dataspace endpoint.'}
               </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                {hasSearch ? (
+                  <Button variant="outline" onClick={() => setSearch('')}>
+                    Clear search
+                  </Button>
+                ) : null}
+                <Button onClick={() => setRegistrationOpen(true)}>
+                  <Plus className="h-4 w-4" /> Register source
+                </Button>
+              </div>
             </div>
           )}
-
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((value) => value - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((value) => value + 1)}
-            >
-              Next
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
@@ -302,6 +474,36 @@ export function SourcesList() {
           }}
         />
       ) : null}
+
+      <ConfirmDialog
+        destructive
+        open={clearingCredential !== null}
+        onOpenChange={(next) => {
+          if (!next) setClearingCredential(null);
+        }}
+        confirmLabel="Clear credentials"
+        title={`Clear credentials for "${clearingCredential?.title ?? ''}"?`}
+        description="The stored secret is deleted and cannot be recovered. Discovery through this source will fail until new credentials are added."
+        onConfirm={async () => {
+          if (clearingCredential) {
+            await handleDeleteCredential(clearingCredential);
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        destructive
+        open={removing !== null}
+        onOpenChange={(next) => {
+          if (!next) setRemoving(null);
+        }}
+        confirmLabel="Remove"
+        title={`Remove "${removing?.title ?? ''}"?`}
+        description="This removes the source and its stored credentials. Sources with dependent Things cannot be removed."
+        onConfirm={async () => {
+          if (removing) await handleDelete(removing);
+        }}
+      />
     </div>
   );
 }

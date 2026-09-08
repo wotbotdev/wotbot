@@ -3,13 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
+from contextlib import ExitStack
 from copy import deepcopy
-from unittest.mock import AsyncMock, patch
+from dataclasses import replace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi import HTTPException
 
 from wotbot.catalog import validate_document
+from wotbot.catalog.models import ThingRecord
 from wotbot.catalog.service import _validate_protected_resource_update
+from wotbot.core.settings import Settings
 from wotbot.discovery.detection import DetectionContext
 from wotbot.discovery.errors import StaleCandidateError
 from wotbot.discovery.http import HttpPayload
@@ -33,6 +37,8 @@ from wotbot.discovery.providers.openapi import (
     resolve_server,
     select_security,
 )
+from wotbot.discovery.service import DiscoveryService
+from wotbot.discovery.source_models import SourceRecord
 from wotbot.discovery.store import RefreshStore
 
 
@@ -638,6 +644,202 @@ class OpenApiProviderTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertRaisesRegex(StaleCandidateError, "changed"),
         ):
             await provider.onboarding_document(source(), candidate, runtime=AsyncMock())
+
+
+class OpenApiRegistrationTestCase(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.service = DiscoveryService(Settings())
+        self.provider = OpenApiProvider()
+        self.record = SourceRecord(
+            id=source().id,
+            provider="openapi",
+            external_id=source().external_id,
+            title="Pet API",
+            description="",
+            tags=[],
+            config=source().config,
+            network_access="public",
+            security_name="nosec_sc",
+            security_scheme="nosec",
+        )
+        self.thing: ThingRecord | None = None
+        self.registered = False
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        stack.enter_context(
+            patch.dict("wotbot.discovery.providers.PROVIDERS", openapi=self.provider)
+        )
+        stack.enter_context(
+            patch.object(self.service, "_create_source", side_effect=self.save_source)
+        )
+        stack.enter_context(patch.object(self.service, "_find_source", return_value=self.record))
+        stack.enter_context(
+            patch.object(self.service, "_update_source_record", return_value=self.record)
+        )
+        stack.enter_context(
+            patch.object(self.service, "_find_existing", side_effect=lambda **_: self.thing)
+        )
+        stack.enter_context(
+            patch("wotbot.discovery.service.get_session_factory", return_value=MagicMock())
+        )
+        stack.enter_context(
+            patch(
+                "wotbot.discovery.service._management_source",
+                side_effect=lambda record: {
+                    "source_id": record.id,
+                    "dependent_thing_count": int(self.thing is not None),
+                },
+            )
+        )
+        stack.enter_context(
+            patch(
+                "wotbot.discovery.service.resolve_public_source",
+                new=AsyncMock(return_value=(source(), ["Detected OpenAPI"], True)),
+            )
+        )
+        self.challenge = stack.enter_context(
+            patch("wotbot.discovery.service._credential_challenge", return_value={})
+        )
+        self.load = stack.enter_context(
+            patch.object(self.provider, "_load", new=AsyncMock(return_value=parsed_api()))
+        )
+        writer = stack.enter_context(patch("wotbot.discovery.service.ThingCatalogWriteService"))
+        self.write = writer.return_value.create_discovered
+        self.write.side_effect = self.save_thing
+        self.service._candidate_store.put_many = AsyncMock()
+
+    def save_source(self, _source: SourceDefinition) -> tuple[SourceRecord, bool]:
+        created = not self.registered
+        self.registered = True
+        return self.record, created
+
+    def save_thing(self, document: dict, *, provider: str, external_id: str, source_id: str):
+        self.thing = ThingRecord(
+            id=document["id"],
+            title=document["title"],
+            description=document.get("description", ""),
+            tags=[],
+            origin_kind="discovery",
+            origin_provider=provider,
+            origin_external_id=external_id,
+            origin_source_id=source_id,
+            document=document,
+            document_hash="generated-hash",
+        )
+        return self.thing, True
+
+    async def register_explicitly(self, *, update: bool = False) -> dict:
+        method = self.service.update_registered_source if update else self.service.register_source
+        return await method(
+            **({"source_id": self.record.id} if update else {}),
+            provider="openapi",
+            title="Pet API",
+            description="",
+            tags=[],
+            config=source().config,
+            security=None,
+            network_access="public",
+        )
+
+    async def test_detected_registration_creates_a_linked_thing_and_reuses_it_on_retry(
+        self,
+    ) -> None:
+        first = await self.service.register_source_url(source=source().external_id)
+        assert self.thing is not None
+        self.assertTrue(first["created"])
+        self.assertTrue(first["onboarding"]["created"])
+        self.assertEqual(first["onboarding"]["thing"]["id"], self.thing.id)
+        self.assertEqual(first["source"]["dependent_thing_count"], 1)
+        self.assertEqual(self.thing.origin_source_id, self.record.id)
+        self.assertIn("getPet", self.thing.document["actions"])
+        self.thing.document["title"] = "My local title"
+        self.thing = replace(self.thing, title="My local title")
+
+        repeated = await self.service.register_source_url(source=source().external_id)
+
+        self.assertFalse(repeated["created"])
+        self.assertFalse(repeated["onboarding"]["created"])
+        self.assertEqual(repeated["onboarding"]["thing"]["title"], "My local title")
+        self.write.assert_called_once()
+        self.service._candidate_store.put_many.assert_not_awaited()
+
+    async def test_explicit_registration_and_source_updates_complete_single_thing_onboarding(
+        self,
+    ) -> None:
+        for update in (False, True):
+            with self.subTest(update=update):
+                self.thing = None
+                result = await self.register_explicitly(update=update)
+                self.assertTrue(result["onboarding"]["created"])
+                self.assertEqual(result["source"]["dependent_thing_count"], 1)
+
+    async def test_multiple_groups_still_require_selection(self) -> None:
+        self.load.return_value = parsed_api(api_document(operation_count=31))
+        result = await self.register_explicitly()
+        self.assertTrue(result["created"])
+        self.assertEqual(result["onboarding"]["status"], "selection_required")
+        self.assertEqual(result["source"]["dependent_thing_count"], 0)
+        self.write.assert_not_called()
+
+    async def test_a_catalog_is_not_automatically_searched_or_onboarded(self) -> None:
+        self.record = replace(self.record, provider="udata")
+        with patch(
+            "wotbot.discovery.providers.udata.UdataProvider.search", new=AsyncMock()
+        ) as search:
+            result = await self.service.register_source(
+                provider="udata",
+                title="Catalog",
+                description="",
+                tags=[],
+                config={"url": "https://data.example"},
+                security=None,
+                network_access="public",
+            )
+        self.assertNotIn("onboarding", result)
+        search.assert_not_awaited()
+        self.write.assert_not_called()
+
+    async def test_failed_compilation_preserves_the_source_for_a_successful_retry(self) -> None:
+        self.load.side_effect = [parsed_api(), OpenApiError("private upstream detail")]
+        result = await self.register_explicitly()
+        self.assertTrue(result["created"])
+        self.assertEqual(result["onboarding"]["status"], "onboarding_failed")
+        self.assertNotIn("private upstream detail", json.dumps(result))
+        self.write.assert_not_called()
+        self.load.side_effect = None
+
+        retried = await self.register_explicitly()
+
+        self.assertFalse(retried["created"])
+        self.assertTrue(retried["onboarding"]["created"])
+
+    async def test_missing_credentials_defer_onboarding_until_registration_is_retried(self) -> None:
+        self.challenge.return_value = {
+            "credential_challenge": {
+                "status": "credential_required",
+                "owner_kind": "source",
+                "source_id": self.record.id,
+                "security_name": "source_sc",
+                "scheme": "apikey",
+            }
+        }
+        result = await self.register_explicitly()
+        self.assertIn("credential_challenge", result)
+        self.load.assert_not_awaited()
+        self.challenge.return_value = {}
+
+        result = await self.register_explicitly()
+
+        self.assertTrue(result["onboarding"]["created"])
+
+    async def test_onboarding_permission_is_required_before_the_source_is_probed(self) -> None:
+        result = await self.service.register_source_url(
+            source=source().external_id, allow_onboarding=False
+        )
+        self.assertTrue(result["created"])
+        self.assertEqual(result["onboarding"]["status"], "permission_required")
+        self.load.assert_not_awaited()
+        self.write.assert_not_called()
 
 
 class OpenApiRefreshMergeTestCase(unittest.TestCase):

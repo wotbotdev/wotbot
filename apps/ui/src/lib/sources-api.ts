@@ -41,12 +41,26 @@ export interface SourceCredentialChallenge {
   scheme: string;
 }
 
+export interface SourceOnboardingResult {
+  created?: boolean;
+  thing?: { id: string; title: string };
+  refresh_available?: boolean;
+  warnings?: string[];
+  status?:
+    | 'selection_required'
+    | 'no_supported_things'
+    | 'permission_required'
+    | 'onboarding_failed';
+  message?: string;
+}
+
 export interface SourceRegistrationResult {
   created?: boolean;
   source?: DiscoverySource;
   credential_challenge?: SourceCredentialChallenge;
   unsupported_source?: boolean;
   probe_evidence?: string[];
+  onboarding?: SourceOnboardingResult;
 }
 
 export interface SourceDraft {

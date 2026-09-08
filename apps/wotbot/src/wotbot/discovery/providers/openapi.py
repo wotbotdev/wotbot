@@ -158,6 +158,7 @@ class OpenApiProvider(DiscoveryProvider):
     capabilities = ("detect", "search", "onboard", "refresh")
     detect_priority = 10
     public_max_bytes = _MAX_SPEC_BYTES
+    auto_onboard_single_result = True
     config = ProviderConfigSpec(
         fields=frozenset({"url", "server_url_override", "api_key_header"}),
         url_fields=("url",),

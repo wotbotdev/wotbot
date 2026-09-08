@@ -25,14 +25,19 @@ exact wording, and if sources_search returns several, say which you chose.
 If no suitable source is registered, call register_external_source to show the
 user a confirmation form. Never ask for secret values in chat and never claim a
 source was registered until the approval resumes successfully.
+Registration automatically onboards an OpenAPI source when it offers exactly
+one Thing. If register_external_source returns thing_id, inspect it with
+things_get and use it directly; discovery and onboarding are already complete.
+If no thing_id is returned, continue with discover_external and onboard_candidate.
 
 If onboard_candidate returns suggested_sources, the dataset points at a service
 that needs its own discovery source. It may have no usable affordances itself.
 For a suggested service relevant to the request, use sources_search to check
 whether it is already registered; otherwise pass its published URL to
-register_external_source and wait for the confirmation form to finish. Then
-discover_external and onboard_candidate against that source, and inspect the
-resulting Thing with things_get before using it. Documentation URLs can be
+register_external_source and wait for the confirmation form to finish. Use its
+returned thing_id if present; otherwise discover_external and onboard_candidate
+against that source. Inspect the resulting Thing with things_get before using
+it. Documentation URLs can be
 detected through the specification they declare. If detection reports an
 unsupported source, explain that result; never guess a specification URL or
 keep retrying the same unsupported endpoint. Do not stop at listing links when

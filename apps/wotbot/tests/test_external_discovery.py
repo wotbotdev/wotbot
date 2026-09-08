@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any, ClassVar, TypedDict
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langgraph.types import Command
@@ -19,6 +20,8 @@ from wotbot.agent.tools.external_discovery import (
     register_external_source,
     sources_search,
 )
+from wotbot.auth.dependencies import require_user
+from wotbot.auth.models import User
 from wotbot.catalog.models import ThingRecord
 from wotbot.core.settings import Settings
 from wotbot.discovery.errors import (
@@ -44,7 +47,7 @@ from wotbot.discovery.providers.base import (
     provider_download_action,
 )
 from wotbot.discovery.providers.udata import resources
-from wotbot.discovery.routes import _download_response, _registration_result
+from wotbot.discovery.routes import _download_response, _registration_result, router
 from wotbot.discovery.search import prepare_search_intent
 from wotbot.discovery.service import DiscoveryService
 from wotbot.discovery.source_models import SourceRecord
@@ -139,6 +142,39 @@ def thing_record(
         },
         document_hash="hash",
     )
+
+
+class SourceRegistrationPermissionsTestCase(unittest.TestCase):
+    def test_registration_routes_only_allow_thing_creation_with_write_scope(self) -> None:
+        body = {"provider": "openapi", "config": {"url": "https://api.example/openapi.json"}}
+        for write_allowed in (False, True):
+            user = User(
+                user_id="source-manager",
+                scopes=["sources:manage", *(["things:write"] if write_allowed else [])],
+            )
+            app = FastAPI()
+            app.state.settings = Settings()
+            app.include_router(router)
+            app.dependency_overrides[require_user] = lambda: user
+            for method, path, payload, service_method in (
+                ("POST", "/api/discovery/sources", body, "register_source"),
+                (
+                    "POST",
+                    "/api/discovery/sources/detect",
+                    {"url": "https://api.example"},
+                    "register_source_url",
+                ),
+                ("PUT", "/api/discovery/sources/source-a", body, "update_registered_source"),
+            ):
+                with self.subTest(write_allowed=write_allowed, path=path):
+                    register = AsyncMock(return_value={"source": {"source_id": "source-a"}})
+                    with (
+                        patch.object(DiscoveryService, service_method, new=register),
+                        TestClient(app) as client,
+                    ):
+                        response = client.request(method, path, json=payload)
+                    self.assertIn(response.status_code, (200, 201))
+                    self.assertEqual(register.await_args.kwargs["allow_onboarding"], write_allowed)
 
 
 class CandidateContractTestCase(unittest.IsolatedAsyncioTestCase):
@@ -271,12 +307,14 @@ class AgentToolTestCase(unittest.IsolatedAsyncioTestCase):
                 resume={
                     "status": "source_registered",
                     "source_id": "urn:wotbot:source:udata:test",
+                    "thing_id": "urn:wotbot:external:openapi:test",
                 }
             ),
             config=config,
         )
         self.assertEqual(resumed["result"]["status"], "source_registered")
         self.assertEqual(resumed["result"]["source_id"], "urn:wotbot:source:udata:test")
+        self.assertEqual(resumed["result"]["thing_id"], "urn:wotbot:external:openapi:test")
 
     async def test_registration_rejects_unscoped_config_and_credentialed_urls(self) -> None:
         with self.assertRaisesRegex(ValueError, "configuration requires a provider"):

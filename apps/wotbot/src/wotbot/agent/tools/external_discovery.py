@@ -155,9 +155,11 @@ def _register_external_source(
     if not isinstance(answer, dict) or answer.get("status") != "source_registered":
         return {"status": "source_registration_cancelled"}
     source_id = answer.get("source_id")
+    thing_id = answer.get("thing_id")
     return {
         "status": "source_registered",
         **({"source_id": source_id} if isinstance(source_id, str) else {}),
+        **({"thing_id": thing_id} if isinstance(thing_id, str) and thing_id else {}),
     }
 
 

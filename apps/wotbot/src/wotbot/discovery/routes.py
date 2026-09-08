@@ -24,12 +24,6 @@ from wotbot.discovery.errors import (
     SourceUnavailableError,
 )
 
-# A misconfigured source can name internal configuration, so only this fixed
-# text is ever returned to a caller.
-_MISCONFIGURED_DETAIL = (
-    "This discovery source's stored configuration is no longer valid. "
-    "Re-register or edit the source; the external service was not contacted."
-)
 from wotbot.discovery.http import BoundedHttpClient
 from wotbot.discovery.providers import PROVIDERS
 from wotbot.discovery.service import DiscoveryService
@@ -40,6 +34,13 @@ from wotbot.discovery.source_store import (
     set_source_credential,
 )
 from wotbot.discovery.store import DownloadStore
+
+# A misconfigured source can name internal configuration, so only this fixed
+# text is ever returned to a caller.
+_MISCONFIGURED_DETAIL = (
+    "This discovery source's stored configuration is no longer valid. "
+    "Re-register or edit the source; the external service was not contacted."
+)
 
 router = APIRouter(prefix="/api/discovery", tags=["discovery"])
 RuntimeServiceDep = Annotated[User, Depends(require_service(["wot_runtime"]))]
@@ -125,6 +126,7 @@ async def register_source(
             config=body.config,
             security=body.security,
             network_access=body.network_access,
+            allow_onboarding="things:write" in (_user.scopes or []),
         )
         return _registration_result(result)
     except (TypeError, ValueError) as exc:
@@ -141,6 +143,7 @@ async def detect_and_register_source(
         result = await DiscoveryService(_settings(request)).register_source_url(
             source=body.url,
             network_access=body.network_access,
+            allow_onboarding="things:write" in (_user.scopes or []),
         )
         return _registration_result(result)
     except (TypeError, ValueError) as exc:
@@ -164,6 +167,7 @@ async def update_source(
             config=body.config,
             security=body.security,
             network_access=body.network_access,
+            allow_onboarding="things:write" in (_user.scopes or []),
         )
         return _registration_result(result)
     except (TypeError, ValueError) as exc:

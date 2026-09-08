@@ -110,10 +110,14 @@ function ChatStream({
           command: { resume: { status: 'source_registration_cancelled' } },
         })
       }
-      onRegistered={(sourceId) =>
+      onRegistered={(sourceId, thingId) =>
         stream.submit(null, {
           command: {
-            resume: { status: 'source_registered', source_id: sourceId },
+            resume: {
+              status: 'source_registered',
+              source_id: sourceId,
+              ...(thingId ? { thing_id: thingId } : {}),
+            },
           },
         })
       }

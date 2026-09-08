@@ -240,7 +240,7 @@ class DiscoveryService:
             return await self._onboard_resource(
                 source_record=source_record,
                 source=source,
-                candidate=candidate,
+                candidate=_candidate_draft(candidate),
             )
         except SourceAuthenticationError as exc:
             raise CredentialChallengeError(
@@ -287,6 +287,7 @@ class DiscoveryService:
         config: dict[str, Any],
         security: dict[str, Any] | None,
         network_access: str,
+        allow_onboarding: bool = True,
     ) -> dict[str, Any]:
         source = _registered_source(
             provider=provider,
@@ -300,8 +301,7 @@ class DiscoveryService:
         record, created = await asyncio.to_thread(self._create_source, source)
         return {
             "created": created,
-            "source": await asyncio.to_thread(_management_source, record),
-            **_credential_challenge(record),
+            **await self._complete_source_registration(record, allow_onboarding=allow_onboarding),
         }
 
     async def register_source_url(
@@ -309,6 +309,7 @@ class DiscoveryService:
         *,
         source: str,
         network_access: str = "public",
+        allow_onboarding: bool = True,
     ) -> dict[str, Any]:
         source_ref = source.strip()
         if not is_http_endpoint(source_ref):
@@ -336,9 +337,86 @@ class DiscoveryService:
         record, created = await asyncio.to_thread(self._create_source, resolved)
         return {
             "created": created,
-            "source": await asyncio.to_thread(_management_source, record),
             "probe_evidence": evidence,
-            **_credential_challenge(record),
+            **await self._complete_source_registration(record, allow_onboarding=allow_onboarding),
+        }
+
+    async def _complete_source_registration(
+        self, record: SourceRecord, *, allow_onboarding: bool
+    ) -> dict[str, Any]:
+        result = await asyncio.to_thread(_credential_challenge, record)
+        provider = PROVIDERS[record.provider]
+        if not result and provider.auto_onboard_single_result:
+            if allow_onboarding:
+                result = await self._onboard_single_source_result(record)
+            else:
+                result["onboarding"] = {
+                    "status": "permission_required",
+                    "message": "Adding this source's Thing requires Things write access.",
+                }
+        # Read after onboarding so the dependent count includes a newly created Thing.
+        return {"source": await asyncio.to_thread(_management_source, record), **result}
+
+    async def _onboard_single_source_result(self, record: SourceRecord) -> dict[str, Any]:
+        try:
+            source, public_http = await asyncio.to_thread(self._source_runtime, record)
+            provider = PROVIDERS[source.provider]
+            candidates = await provider.search(
+                source,
+                prepare_search_intent("", source),
+                2,
+                public_http=public_http,
+            )
+            if len(candidates) != 1:
+                return {
+                    "onboarding": {
+                        "status": "selection_required" if candidates else "no_supported_things",
+                        "message": (
+                            "This source offers multiple Things. Choose which to add."
+                            if candidates
+                            else "This source has no supported Things to add."
+                        ),
+                    }
+                }
+            candidate = candidates[0]
+            if (
+                candidate.provider != record.provider
+                or candidate.source_id != record.id
+                or candidate.kind == "source"
+                or "onboard" not in candidate.capabilities
+            ):
+                raise ValueError("Provider returned an invalid onboarding candidate")
+            onboarding = await self._onboard_resource(
+                source_record=record, source=source, candidate=candidate
+            )
+            return {"onboarding": onboarding}
+        except CredentialChallengeError as exc:
+            return {"credential_challenge": exc.public()}
+        except SourceAuthenticationError:
+            if record.security_scheme != "nosec":
+                return {
+                    "credential_challenge": {
+                        "status": "credential_rejected",
+                        "owner_kind": "source",
+                        "source_id": record.id,
+                        "security_name": record.security_name,
+                        "scheme": record.security_scheme,
+                    }
+                }
+        except (aiohttp.ClientError, OSError, TimeoutError, ProviderError, ValueError):
+            logger.warning(
+                "Automatic onboarding failed for source %s (provider %s)",
+                record.id,
+                record.provider,
+                exc_info=True,
+            )
+        # Source registration has already succeeded. Keep it usable for a retry
+        # and report the separate onboarding failure without upstream details.
+        return {
+            "onboarding": {
+                "status": "onboarding_failed",
+                "message": "The source was saved, but its Thing could not be added. Retry registration or discover it again.",
+            }
         }
 
     async def update_registered_source(
@@ -352,6 +430,7 @@ class DiscoveryService:
         config: dict[str, Any],
         security: dict[str, Any] | None,
         network_access: str,
+        allow_onboarding: bool = True,
     ) -> dict[str, Any]:
         current = await asyncio.to_thread(self._find_source, source_id)
         if current is None:
@@ -373,10 +452,7 @@ class DiscoveryService:
                 "Source provider and canonical identity cannot be changed; register a new source"
             )
         updated = await asyncio.to_thread(self._update_source_record, current, replacement)
-        return {
-            "source": await asyncio.to_thread(_management_source, updated),
-            **_credential_challenge(updated),
-        }
+        return await self._complete_source_registration(updated, allow_onboarding=allow_onboarding)
 
     async def delete_registered_source(self, *, source_id: str) -> None:
         def write() -> None:
@@ -646,7 +722,7 @@ class DiscoveryService:
         *,
         source_record: SourceRecord,
         source: SourceDefinition,
-        candidate: CandidateRecord,
+        candidate: CandidateDraft,
     ) -> dict[str, Any]:
         provider = PROVIDERS.get(candidate.provider)
         if provider is None:
@@ -685,14 +761,14 @@ class DiscoveryService:
                     )
                 ),
             }
-            suggested_sources = provider.suggest_sources(_candidate_draft(candidate))
+            suggested_sources = provider.suggest_sources(candidate)
             if suggested_sources:
                 result["suggested_sources"] = [dict(item) for item in suggested_sources[:5]]
             return result
         try:
             onboarding = await provider.onboarding_document(
                 source,
-                _candidate_draft(candidate),
+                candidate,
                 runtime=WotRuntimeClient(self._settings),
             )
             document = validate_document(onboarding.document)
