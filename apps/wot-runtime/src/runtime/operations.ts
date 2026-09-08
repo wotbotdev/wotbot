@@ -8,6 +8,7 @@ import {
   encodeInteractionOutputPayload,
   encodePayloadEnvelope,
   normalizeBody,
+  rejectHtmlPayload,
 } from '../services/payloads.js';
 import { createRuntimeError, formatError, isDataSchemaError } from '../services/errors.js';
 import { getAffordanceDefinition, getFormHttpMethod, resolveFormIndex } from '../services/form-selection.js';
@@ -152,6 +153,35 @@ export function resolveInvokeActionInput(actionDef: unknown, input: unknown): un
     return {};
   }
   return input;
+}
+
+/**
+ * Recover declared URI parameters supplied as a GET/HEAD body before dropping it.
+ * Explicit URI variables take precedence. Other methods and bindings keep their input.
+ */
+export function resolveInvokeActionParameters(
+  document: ThingDescription,
+  actionName: string,
+  formIndex: number | undefined,
+  input: unknown,
+  uriVariables: Record<string, unknown>,
+): { input: unknown; uriVariables: Record<string, unknown> } {
+  const method = getFormHttpMethod(document, actionName, 'invokeaction', formIndex);
+  if (method !== 'GET' && method !== 'HEAD') {
+    return { input, uriVariables };
+  }
+
+  const action = getAffordanceDefinition(document, actionName, 'invokeaction');
+  const declared = {
+    ...(isPlainObject(document.uriVariables) ? document.uriVariables : {}),
+    ...(isPlainObject(action?.uriVariables) ? action.uriVariables : {}),
+  };
+  const resolvedVariables =
+    Object.keys(uriVariables).length === 0 && isPlainObject(input) && !Buffer.isBuffer(input)
+      ? Object.fromEntries(Object.entries(input).filter(([key]) => Object.hasOwn(declared, key)))
+      : uriVariables;
+
+  return { input: undefined, uriVariables: resolvedVariables };
 }
 
 /**
@@ -341,16 +371,16 @@ export async function handleInvokeAction(request: any): Promise<any> {
   }
   const resolvedInput = resolveInvokeActionInput(actionDef, decodedInput);
 
-  // GET/HEAD requests must not carry a body (RFC 9110). For HTTP forms bound to
-  // these methods, an action's input travels via uriVariables (kept in
-  // options), so we drop the body here — otherwise node-wot tries to send it
-  // and the request fails. Non-GET/HEAD and non-HTTP forms are unaffected.
-  const httpMethod = getFormHttpMethod(document, actionName, 'invokeaction', resolvedFormIndex);
-  const bodilessMethod = httpMethod === 'GET' || httpMethod === 'HEAD';
-  if (bodilessMethod && resolvedInput !== undefined) {
-    log.debug(`Dropping body for ${httpMethod} action '${thingId}/${actionName}'; input flows via uriVariables`);
+  const { input, uriVariables } = resolveInvokeActionParameters(
+    document,
+    actionName,
+    resolvedFormIndex,
+    resolvedInput,
+    decodeUriVariables(request.uriVariables),
+  );
+  if (Object.keys(uriVariables).length > 0) {
+    options.uriVariables = uriVariables;
   }
-  const input = bodilessMethod ? undefined : resolvedInput;
 
   if (isPlainObject(actionDef) && actionDef.synchronous === false) {
     throw createRuntimeError(
@@ -360,18 +390,17 @@ export async function handleInvokeAction(request: any): Promise<any> {
   }
 
   const isCacheable = isCacheableSafeAction(actionDef);
-  const uriVariables = decodeUriVariables(request.uriVariables);
   const cacheKey = isCacheable ? buildCacheKey(thingId, 'invoke_action', actionName, uriVariables, input) : '';
 
   if (isCacheable) {
     const cached = await getCached(cacheKey);
     if (cached) {
+      const body = Buffer.from(cached.payload, 'base64');
+      rejectHtmlPayload(body, cached.contentType);
       log.info(`Cache hit for invokeAction '${thingId}/${actionName}'`);
       return {
-        completedResult: buildEncodedInteractionResponse(
-          { body: Buffer.from(cached.payload, 'base64'), contentType: cached.contentType },
-          cached.contentType,
-        ).response,
+        completedResult: buildEncodedInteractionResponse({ body, contentType: cached.contentType }, cached.contentType)
+          .response,
       };
     }
   }

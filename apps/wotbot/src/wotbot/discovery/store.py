@@ -23,6 +23,10 @@ from wotbot.discovery.models import CandidateRecord, DownloadRecord, RefreshReco
 _CANDIDATE_ID = re.compile(r"^[A-Za-z0-9_-]{32}$")
 _DOWNLOAD_ID = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _REFRESH_ID = re.compile(r"^[A-Za-z0-9_-]{43}$")
+_MISSING_CANDIDATE = (
+    "Candidate was not found or has expired. Repeat discovery against "
+    "the same source in the current session; do not invent a candidate ID."
+)
 
 # Keyed by the event loop as well as the URL: a redis.asyncio client binds to
 # the loop that created it, and tests run each case on a fresh loop. Holding the
@@ -91,13 +95,16 @@ class CandidateStore:
         scope_id: str,
     ) -> CandidateRecord:
         if not _CANDIDATE_ID.fullmatch(candidate_id):
-            raise ValueError("Candidate was not found or has expired")
+            raise ValueError(_MISSING_CANDIDATE)
         payload = await client_for(self._redis_url).get(f"discovery:candidate:{candidate_id}")
         if not payload:
-            raise ValueError("Candidate was not found or has expired")
+            raise ValueError(_MISSING_CANDIDATE)
         candidate = CandidateRecord.from_dict(json.loads(payload))
         if candidate.scope_kind != scope_kind or candidate.scope_id != scope_id:
-            raise ValueError("Candidate belongs to a different discovery scope")
+            raise ValueError(
+                "Candidate belongs to a different discovery scope. Repeat discovery "
+                "against the same source in the current session."
+            )
         return candidate
 
 

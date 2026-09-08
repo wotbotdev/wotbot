@@ -1,4 +1,4 @@
-import { isDataSchemaError } from './errors.js';
+import { createRuntimeError, isDataSchemaError } from './errors.js';
 
 /**
  * Checks if a value is a plain object (not null, not an array).
@@ -145,6 +145,35 @@ export function extractProtocol(href: unknown): string {
   }
 }
 
+function isJsonContentType(contentType: string): boolean {
+  const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
+  return mediaType === 'application/json' || mediaType === 'text/json' || mediaType.endsWith('+json');
+}
+
+/**
+ * Reject HTML error pages masquerading as JSON or tabular data.
+ * Inspect original bytes so JSON strings containing markup remain valid data.
+ * HTML, XML, plain text and unknown binary formats have no such restriction.
+ */
+export function rejectHtmlPayload(body: Buffer, contentType: string): void {
+  const mediaType = contentType.split(';', 1)[0].trim().toLowerCase();
+  const json = isJsonContentType(contentType);
+  if (!json && !['text/csv', 'application/csv', 'text/tab-separated-values'].includes(mediaType)) {
+    return;
+  }
+
+  const head = body.subarray(0, 512).toString('utf8').trimStart();
+  const document = /^(?:<!doctype\s+html(?:\s|>)|<(?:html|head|body)(?:\s|>))/i.test(head);
+  const fragment = json && /^<(?:h[1-6]|p|div)(?:\s|>)/i.test(head);
+  if (document || fragment) {
+    throw createRuntimeError(
+      'invalid_response',
+      `The upstream returned HTML while the Thing declares '${mediaType}'. ` +
+        'Check the source URL and the action URI variables.',
+    );
+  }
+}
+
 /**
  * Encodes the output of a WoT interaction (property read or action invocation) into a standardized payload.
  * Handles schema validation errors by returning the invalid value if possible.
@@ -167,35 +196,39 @@ export async function encodeInteractionOutputPayload(
   const form = output?.form;
   const contentType = extractContentType(form);
   const sourceProtocol = extractProtocol(isPlainObject(form) ? form.href : '');
-  const rawOutput = async () => ({
-    body: Buffer.from(await output.arrayBuffer()),
-    contentType,
-    sourceProtocol,
-  });
+  const readRawBody = async () => {
+    const body = Buffer.from(await output.arrayBuffer());
+    rejectHtmlPayload(body, contentType);
+    return body;
+  };
+  const rawOutput = async () => ({ body: await readRawBody(), contentType, sourceProtocol });
 
   if (output?.schema == null && typeof output?.arrayBuffer === 'function') {
     return rawOutput();
   }
 
+  let value: unknown;
   try {
-    const value = await output.value();
-    const payload = encodePayloadEnvelope(value, contentType);
-    return {
-      body: normalizeBody(payload.body),
-      contentType: String(payload.contentType || contentType),
-      sourceProtocol,
-    };
+    value = await output.value();
   } catch (error) {
     if (isDataSchemaError(error)) {
       options?.onInvalidSchema?.(error.value);
-      const payload = encodePayloadEnvelope(error.value, contentType);
-      return {
-        body: normalizeBody(payload.body),
-        contentType: String(payload.contentType || contentType),
-        sourceProtocol,
-      };
+      value = error.value;
+    } else {
+      return rawOutput();
     }
-
-    return rawOutput();
   }
+
+  // node-wot retains the original buffer after value(), including schema errors.
+  // Validate outside the catch so a rejected page cannot fall back to success.
+  await readRawBody();
+  const payload = encodePayloadEnvelope(value, contentType);
+  return {
+    body:
+      typeof value === 'string' && isJsonContentType(contentType)
+        ? Buffer.from(JSON.stringify(value))
+        : normalizeBody(payload.body),
+    contentType: String(payload.contentType || contentType),
+    sourceProtocol,
+  };
 }

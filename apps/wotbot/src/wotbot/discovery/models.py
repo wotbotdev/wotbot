@@ -82,6 +82,10 @@ class ProviderConfigSpec:
 class OnboardingResult:
     document: dict[str, Any]
     warnings: tuple[str, ...] = ()
+    # Service endpoints the dataset points at but this provider cannot model.
+    # These are URLs to hand to source detection, not affordances onboarding
+    # resolved; each carries "url" and a human label.
+    suggested_sources: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

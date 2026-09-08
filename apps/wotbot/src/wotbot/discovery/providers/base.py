@@ -65,6 +65,12 @@ class DiscoveryProvider(ABC):
         runtime: OnboardingRuntime,
     ) -> OnboardingResult: ...
 
+    def suggest_sources(self, candidate: CandidateDraft) -> tuple[dict[str, str], ...]:
+        """Return related source URLs from staged metadata without probing or onboarding."""
+
+        del candidate
+        return ()
+
     @property
     def generation_marker(self) -> str:
         """The ``wotbot:generatedBy`` stamp this provider puts on what it owns."""

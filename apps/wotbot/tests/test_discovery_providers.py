@@ -31,7 +31,12 @@ from wotbot.discovery.providers.edc_v3 import (
     secret_headers,
 )
 from wotbot.discovery.providers.public import detectors, resolve_public_source
-from wotbot.discovery.providers.udata import UdataProvider, resources, udata_queries
+from wotbot.discovery.providers.udata import (
+    UdataProvider,
+    resources,
+    service_suggestions,
+    udata_queries,
+)
 from wotbot.discovery.search import prepare_search_intent
 from wotbot.discovery.service import _management_sources
 from wotbot.discovery.source_models import SourceRecord
@@ -495,6 +500,49 @@ class UdataParsingTestCase(unittest.TestCase):
         self.assertEqual(descriptor["filename"], "roads.csv")
         self.assertEqual(descriptor["size_bytes"], 2048)
 
+    def test_service_endpoints_are_reported_for_source_detection(self) -> None:
+        """uData types every service endpoint ``api``, whatever it speaks.
+
+        The dataset says a service exists; detection decides whether anything
+        supports it, so the suggestion carries the URL rather than a protocol.
+        """
+
+        descriptors = resources(
+            [
+                {"id": "csv", "url": "https://data.example/roads.csv", "format": "csv"},
+                {
+                    "id": "svc",
+                    "title": "Weather API",
+                    "url": "https://api.example/v1",
+                    "format": "json",
+                    "type": "api",
+                },
+                {
+                    "id": "doc",
+                    "title": "API docs",
+                    "url": "https://api.example/v1/docs",
+                    "format": "html",
+                    "type": "documentation",
+                },
+                {"id": "wms", "url": "https://maps.example/wms", "format": "wms", "type": "api"},
+            ]
+        )
+        suggestions = service_suggestions(descriptors)
+        self.assertEqual(
+            [item["url"] for item in suggestions],
+            [
+                "https://api.example/v1",
+                "https://api.example/v1/docs",
+                "https://maps.example/wms",
+            ],
+        )
+        self.assertEqual(suggestions[0]["title"], "Weather API")
+        self.assertEqual(suggestions[2]["format"], "wms")
+
+    def test_a_dataset_of_plain_downloads_suggests_nothing(self) -> None:
+        descriptors = resources([{"id": "csv", "url": "https://data.example/a.csv"}])
+        self.assertEqual(service_suggestions(descriptors), ())
+
     def test_a_media_type_is_inferred_from_a_bare_format(self) -> None:
         [descriptor] = resources([{"url": "https://data.example/a.json", "format": "json"}])
         self.assertEqual(descriptor["media_type"], "application/json")
@@ -565,6 +613,68 @@ class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
         with patch.object(UdataProvider, "_json", new=fake_json):
             with self.assertRaises(SourceProtocolError):
                 await UdataProvider().search(source, prepare_search_intent("roads", source), 5)
+
+    async def test_a_dataset_that_only_points_at_a_service_suggests_registering_it(
+        self,
+    ) -> None:
+        """The MeteoLux shape: an API entry with nothing downloadable in it.
+
+        Such a dataset used to onboard as a Thing with no affordances at all.
+        It still has none, because the dataset genuinely holds no data, but it
+        now reports where the data actually lives.
+        """
+
+        descriptors = resources(
+            [
+                {
+                    "id": "svc",
+                    "title": "Meteo API endpoint",
+                    "url": "https://api.example/v1",
+                    "format": "json",
+                    "type": "api",
+                },
+                {
+                    "id": "doc",
+                    "title": "Meteo API docs",
+                    "url": "https://api.example/v1/docs",
+                    "format": "html",
+                    "type": "documentation",
+                },
+            ]
+        )
+        candidate = CandidateDraft(
+            provider="udata",
+            source_id="source-1",
+            external_id="meteo",
+            kind="dataset",
+            title="Meteo API",
+            summary="Weather readings",
+            payload={"resources": descriptors},
+        )
+        result = await UdataProvider().onboarding_document(
+            udata_source(), candidate, runtime=MagicMock()
+        )
+        self.assertNotIn("actions", result.document)
+        self.assertEqual(
+            [item["url"] for item in result.suggested_sources],
+            ["https://api.example/v1", "https://api.example/v1/docs"],
+        )
+
+    async def test_a_dataset_with_downloads_onboards_without_suggestions(self) -> None:
+        descriptors = resources([{"id": "csv", "url": "https://data.example/roads.csv"}])
+        candidate = CandidateDraft(
+            provider="udata",
+            source_id="source-1",
+            external_id="roads",
+            kind="dataset",
+            title="Roads",
+            payload={"resources": descriptors},
+        )
+        result = await UdataProvider().onboarding_document(
+            udata_source(), candidate, runtime=MagicMock()
+        )
+        self.assertEqual(len(result.document["actions"]), 1)
+        self.assertEqual(result.suggested_sources, ())
 
     async def test_a_documentation_resource_cannot_be_downloaded(self) -> None:
         source = udata_source()
@@ -734,6 +844,95 @@ class PublicDetectionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(source.provider, "openapi")
         self.assertEqual(source.title, "Sensor API")
         self.assertTrue(any("OpenAPI" in line for line in evidence))
+
+    async def test_a_404_api_base_is_detected_through_its_openapi_json(self) -> None:
+        base = "https://metapi.ana.lu/api/v1"
+        spec_url = f"{base}/openapi.json"
+        spec = json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "MeteoLux API backend", "version": "1"},
+                "servers": [{"url": "/api/v1"}],
+                "paths": {"/hvd": {"get": {"operationId": "readHvd", "responses": {}}}},
+            }
+        ).encode()
+        routes = {spec_url: (200, "application/json", spec)}
+        with (
+            patch.object(BoundedHttpClient, "request", self._routed(routes)),
+            patch(
+                "wotbot.discovery.providers.openapi.resolve_public", new=AsyncMock()
+            ) as validate_server,
+        ):
+            source, evidence, supported = await resolve_public_source(base)
+        self.assertTrue(supported)
+        assert source is not None
+        self.assertEqual(source.provider, "openapi")
+        self.assertEqual(source.title, "MeteoLux API backend")
+        self.assertEqual(source.external_id, spec_url)
+        self.assertEqual(source.config["url"], spec_url)
+        validate_server.assert_awaited_once_with(base)
+        self.assertTrue(any("HTTP 404" in line for line in evidence))
+        self.assertTrue(any("Trying conventional OpenAPI" in line for line in evidence))
+
+    async def test_a_documentation_page_is_followed_to_the_spec_it_declares(self) -> None:
+        """The URL a catalog hands out is usually the docs page, not the document.
+
+        Swagger UI names its specification in the page it serves, so following
+        that one declaration turns a human-facing URL into a usable source. The
+        source's identity must still be the specification, because that is what
+        refresh re-fetches.
+        """
+
+        spec = json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "Weather API"},
+                "servers": [{"url": "https://api.example/v1"}],
+                "paths": {"/obs": {"get": {"operationId": "listObs", "responses": {}}}},
+            }
+        ).encode()
+        docs = b"""<html><body><div id="swagger-ui"></div><script>
+            SwaggerUIBundle({url: '/v1/openapi.json', dom_id: '#swagger-ui'})
+        </script></body></html>"""
+        routes = {
+            "https://api.example/v1/docs": (200, "text/html", docs),
+            "https://api.example/v1/openapi.json": (200, "application/json", spec),
+        }
+        with (
+            patch.object(BoundedHttpClient, "request", self._routed(routes)),
+            patch(
+                "wotbot.discovery.providers.openapi.resolve_public",
+                new=AsyncMock(return_value=(None, [])),
+            ),
+        ):
+            source, evidence, supported = await resolve_public_source("https://api.example/v1/docs")
+        self.assertTrue(supported)
+        assert source is not None
+        self.assertEqual(source.provider, "openapi")
+        self.assertEqual(source.title, "Weather API")
+        self.assertEqual(source.external_id, "https://api.example/v1/openapi.json")
+        self.assertEqual(source.config["url"], "https://api.example/v1/openapi.json")
+        self.assertTrue(any("declares its API description" in line for line in evidence))
+
+    async def test_a_specification_declared_on_another_host_is_not_followed(self) -> None:
+        """One extra request must not become a fetch of a stranger's host."""
+
+        docs = b"""<html><script>
+            SwaggerUIBundle({url: 'https://elsewhere.example/openapi.json'})
+        </script></html>"""
+        routes = {"https://api.example/v1/docs": (200, "text/html", docs)}
+        with (
+            patch.object(BoundedHttpClient, "request", self._routed(routes)),
+            patch(
+                "wotbot.discovery.providers.openapi.resolve_public",
+                new=AsyncMock(return_value=(None, [])),
+            ),
+        ):
+            source, _evidence, supported = await resolve_public_source(
+                "https://api.example/v1/docs"
+            )
+        self.assertFalse(supported)
+        self.assertIsNone(source)
 
     async def test_a_toolhive_registry_is_claimed_before_any_html_probe(self) -> None:
         workloads = json.dumps(

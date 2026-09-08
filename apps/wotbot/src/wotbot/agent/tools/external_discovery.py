@@ -79,7 +79,14 @@ async def onboard_candidate(
     candidate_id: str,
     config: RunnableConfig,
 ) -> dict[str, Any]:
-    """Create one durable resource Thing from a current-thread candidate."""
+    """Create one durable resource Thing from a current-thread candidate.
+
+    If suggested_sources is returned, the dataset links to services that need
+    their own sources. Find an existing source with sources_search or pass a
+    relevant published URL to register_external_source for user confirmation.
+    Then discover and onboard from that source and inspect its Thing with
+    things_get. A suggested link is not itself a usable affordance.
+    """
     try:
         return await DiscoveryService(get_settings()).onboard(
             candidate_id=candidate_id.strip(), thread_id=_thread_id(config)

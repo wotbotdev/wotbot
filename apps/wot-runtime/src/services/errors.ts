@@ -17,6 +17,7 @@ export function isDataSchemaError(error: unknown): error is Error & { value: unk
  */
 export type RuntimeErrorCode =
   | 'invalid_argument'
+  | 'invalid_response'
   | 'not_found'
   | 'failed_precondition'
   | 'deadline_exceeded'
@@ -30,6 +31,7 @@ export type RuntimeErrorCode =
 
 const HTTP_STATUS_BY_RUNTIME_ERROR_CODE: Record<RuntimeErrorCode, number> = {
   invalid_argument: 400,
+  invalid_response: 502,
   not_found: 404,
   failed_precondition: 412,
   deadline_exceeded: 504,

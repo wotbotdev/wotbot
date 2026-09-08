@@ -19,6 +19,10 @@
   expect: openapi
   note: Swagger 2.0 path, including host/basePath/schemes server resolution.
 
+- url: https://metapi.ana.lu/api/v1
+  expect: openapi
+  note: API base returns 404; the specification is at /api/v1/openapi.json.
+
 - url: https://api.apis.guru/v2/specs/1password.com/events/1.0.0/openapi.json
   expect: openapi
   note: Real third-party spec served from the APIs.guru mirror. Verified live.

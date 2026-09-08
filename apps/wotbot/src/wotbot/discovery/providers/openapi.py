@@ -4,6 +4,14 @@ Expects OpenAPI 3.0, OpenAPI 3.1, or Swagger 2.0, as JSON or YAML, at the
 configured URL. This is the only provider that authors a full Thing Description
 itself, so most of this module is the compiler and its limits.
 
+Detection also accepts a documentation page. Swagger UI and ReDoc name their
+specification in the HTML they serve, and ``service-desc`` is the registered
+link relation for it, so a docs URL is followed once to the document it
+declares -- same-origin only. The source's identity stays the specification,
+which is what refresh must be able to re-fetch.
+An API base URL can also be detected through ``openapi.json`` or ``swagger.json``
+beneath it, using at most two additional probes within the shared request budget.
+
 Configuration
     ``url``
         The specification document. Required. The final URL after redirects
@@ -43,6 +51,7 @@ re-discovered instead of compiled from stale metadata.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
 import re
 from dataclasses import dataclass
@@ -58,7 +67,7 @@ from wotbot.discovery.errors import (
     SourceProtocolError,
     StaleCandidateError,
 )
-from wotbot.discovery.http import BoundedHttpClient, resolve_public
+from wotbot.discovery.http import BoundedHttpClient, HttpPayload, origin_of, resolve_public
 from wotbot.discovery.models import (
     CandidateDraft,
     OnboardingResult,
@@ -88,7 +97,7 @@ _MAX_GROUP_OPERATIONS = 30
 _MAX_TD_BYTES = 512 * 1024
 _MAX_SCHEMA_DEPTH = 20
 _MAX_SCHEMA_NODES = 2_000
-_COMPILER_VERSION = 2
+_COMPILER_VERSION = 3
 _JSON_MEDIA_TYPES = {"application/json", "text/json"}
 _NAME = re.compile(r"[^A-Za-z0-9_]+")
 _URI_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
@@ -168,13 +177,42 @@ class OpenApiProvider(DiscoveryProvider):
         return normalized
 
     async def inspect_public(self, context: DetectionContext) -> SourceDefinition | None:
+        found = await self._probe_specification(context, context.url, allow_follow=True)
+        if found is None:
+            return None
+        document, version, server, spec_url = found
+        info = document.get("info") if isinstance(document.get("info"), dict) else {}
+        context.note(f"Detected {version} with API server {server}")
+        return SourceDefinition(
+            id=spec_url,
+            external_id=spec_url,
+            provider=self.name,
+            title=_bounded_text(info.get("title"), 500) or "OpenAPI service",
+            description=_bounded_text(info.get("description"), 2_000),
+            tags=("OpenAPI", version, "external source"),
+            config={"url": spec_url},
+        )
+
+    async def _probe_specification(
+        self,
+        context: DetectionContext,
+        url: str,
+        *,
+        allow_follow: bool,
+    ) -> tuple[dict[str, Any], str, str, str] | None:
+        """Read a spec, then try a declared link or two conventional base paths.
+
+        Only the initial response allows discovery; subsequent probes must be
+        specifications themselves. Every request uses the same bounded client.
+        """
+
         try:
             response = await context.http.get(
-                context.url,
+                url,
                 headers={
                     "Accept": (
                         "application/vnd.oai.openapi+json,application/json,"
-                        "application/yaml,text/yaml,application/x-yaml"
+                        "application/yaml,text/yaml,application/x-yaml,text/html;q=0.1"
                     )
                 },
                 max_bytes=_MAX_SPEC_BYTES,
@@ -185,27 +223,41 @@ class OpenApiProvider(DiscoveryProvider):
         context.note(
             f"Fetched {response.url} (HTTP {response.status}, {response.content_type or 'unknown'})"
         )
-        if response.status < 200 or response.status >= 300:
+        if 200 <= response.status < 300:
+            try:
+                document = parse_openapi(response.body)
+                version = openapi_version(document)
+                server = resolve_server(document, response.url, "")
+                await resolve_public(server)
+            except (OpenApiError, ProviderError, ValueError, yaml.YAMLError) as exc:
+                context.note(f"Not an OpenAPI document: {exc}")
+            else:
+                return document, version, server, response.url
+            declared = declared_spec_url(response) if allow_follow else None
+            if declared is not None:
+                context.note(f"{response.url} declares its API description at {declared}")
+                return await self._probe_specification(context, declared, allow_follow=False)
+        elif response.status not in {404, 405}:
             return None
-        try:
-            document = parse_openapi(response.body)
-            version = openapi_version(document)
-            server = resolve_server(document, response.url, "")
-            await resolve_public(server)
-        except (OpenApiError, ProviderError, ValueError, yaml.YAMLError) as exc:
-            context.note(f"Not an OpenAPI document: {exc}")
+
+        if not allow_follow:
             return None
-        info = document.get("info") if isinstance(document.get("info"), dict) else {}
-        context.note(f"Detected {version} with API server {server}")
-        return SourceDefinition(
-            id=response.url,
-            external_id=response.url,
-            provider=self.name,
-            title=_bounded_text(info.get("title"), 500) or "OpenAPI service",
-            description=_bounded_text(info.get("description"), 2_000),
-            tags=("OpenAPI", version, "external source"),
-            config={"url": response.url},
-        )
+        parsed = urlparse(response.url)
+        path = parsed.path.rstrip("/")
+        if path.lower().endswith(
+            (".json", ".yaml", ".yml", ".html", ".htm", ".rdf", ".ttl", ".xml")
+        ):
+            return None
+        # Keep an API prefix such as /api/v1, including after redirects, while
+        # discarding query parameters that belong only to the supplied URL.
+        base = parsed._replace(path=f"{path}/", params="", query="", fragment="").geturl()
+        for filename in ("openapi.json", "swagger.json"):
+            spec_url = urljoin(base, filename)
+            context.note(f"Trying conventional OpenAPI specification at {spec_url}")
+            found = await self._probe_specification(context, spec_url, allow_follow=False)
+            if found is not None:
+                return found
+        return None
 
     async def search(
         self,
@@ -347,6 +399,46 @@ class OpenApiProvider(DiscoveryProvider):
             operations=tuple(operations),
             warnings=_warnings((*security_warnings, *operation_warnings)),
         )
+
+
+_MAX_DOCS_SCAN = 262_144
+_DECLARED_SPEC_PATTERNS = (
+    # The registered link relation for an API description.
+    re.compile(r"""rel=["']service-desc["'][^>]*?href=["']([^"']{1,2048})["']""", re.I),
+    re.compile(r"""href=["']([^"']{1,2048})["'][^>]*?rel=["']service-desc["']""", re.I),
+    # ReDoc names it on the element; Swagger UI passes it in its config object.
+    re.compile(r"""spec-?url\s*[=:]\s*["']([^"']{1,2048})["']""", re.I),
+    re.compile(r"""\burl\s*:\s*["']([^"']{1,2048})["']""", re.I),
+)
+
+
+def _looks_like_specification(path: str) -> bool:
+    return "openapi" in path or "swagger" in path or path.endswith((".json", ".yaml", ".yml"))
+
+
+def declared_spec_url(payload: HttpPayload) -> str | None:
+    """The API description an HTML documentation page names, if it names one.
+
+    Swagger UI and ReDoc both configure themselves with their specification's
+    URL, and ``service-desc`` is the registered link relation for it, so a docs
+    page carries the pointer this provider needs. Only a same-origin candidate
+    that looks like a document is returned, so following it cannot be steered
+    into fetching an unrelated host.
+    """
+
+    if "html" not in payload.content_type:
+        return None
+    text = payload.text()[:_MAX_DOCS_SCAN]
+    expected = origin_of(payload.url)
+    for pattern in _DECLARED_SPEC_PATTERNS:
+        for match in pattern.finditer(text):
+            candidate = urljoin(payload.url, html.unescape(match.group(1).strip()))
+            if not _looks_like_specification(urlparse(candidate).path.casefold()):
+                continue
+            if origin_of(candidate) != expected:
+                continue
+            return candidate
+    return None
 
 
 def parse_openapi(body: bytes) -> dict[str, Any]:
@@ -1038,9 +1130,11 @@ def _td_schema(document: dict[str, Any], raw: Any, stack: tuple[str, ...]) -> di
                 _bounded_schema_value(value) for value in enum[:100] if _is_schema_scalar(value)
             ]
         for key in ("const", "default"):
-            value = item.get(key)
-            if _is_schema_scalar(value):
-                result[key] = _bounded_schema_value(value)
+            # Only when the schema actually carries one: `item.get` cannot tell
+            # an absent key from an explicit null, and writing `const: null`
+            # into every node asserts that the value must be null.
+            if key in item and _is_schema_scalar(item[key]):
+                result[key] = _bounded_schema_value(item[key])
         schema_type = result.get("type")
         if isinstance(schema_type, list):
             non_null_types = list(
@@ -1075,8 +1169,22 @@ def _td_schema(document: dict[str, Any], raw: Any, stack: tuple[str, ...]) -> di
         if "items" in item:
             result["type"] = result.get("type") or "array"
             result["items"] = convert(item.get("items"), depth + 1)
-        if isinstance(item.get("oneOf"), list):
-            result["oneOf"] = [convert(child, depth + 1) for child in item["oneOf"][:20]]
+        for union_key in ("oneOf", "anyOf"):
+            branches = item.get(union_key)
+            if not isinstance(branches, list):
+                continue
+            variants = [
+                child for child in branches[:20] if not _is_null_schema(document, child, stack)
+            ]
+            if len(variants) == 1:
+                # OpenAPI 3.1 spells an optional T as `anyOf: [T, "null"]`, which
+                # is what FastAPI and Pydantic emit for every optional parameter.
+                # Collapsing it back to T keeps the declared type, so the
+                # parameter survives instead of being dropped as non-primitive.
+                for key, value in convert(variants[0], depth + 1).items():
+                    result.setdefault(key, value)
+            elif variants:
+                result[union_key] = [convert(child, depth + 1) for child in variants]
         if isinstance(item.get("allOf"), list):
             for child in item["allOf"][:20]:
                 converted = convert(child, depth + 1)
@@ -1090,6 +1198,13 @@ def _td_schema(document: dict[str, Any], raw: Any, stack: tuple[str, ...]) -> di
         return result
 
     return convert(resolved, 0)
+
+
+def _is_null_schema(document: dict[str, Any], value: Any, stack: tuple[str, ...]) -> bool:
+    """Whether a union branch is the null that makes the union nullable."""
+
+    resolved = _resolve(document, value, stack)
+    return isinstance(resolved, dict) and resolved.get("type") == "null"
 
 
 def _resolve(document: dict[str, Any], value: Any, stack: tuple[str, ...]) -> Any:
@@ -1228,6 +1343,7 @@ __all__ = [
     "collect_operations",
     "compile_provider_actions",
     "compile_thing",
+    "declared_spec_url",
     "openapi_version",
     "operation_groups",
     "parse_openapi",

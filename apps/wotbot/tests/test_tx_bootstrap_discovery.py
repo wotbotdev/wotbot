@@ -5,7 +5,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 from wotbot.discovery.errors import SourceProtocolError
-from wotbot.discovery.models import CandidateDraft, SearchIntent, SourceDefinition
+from wotbot.discovery.models import SearchIntent, SourceDefinition
 from wotbot.discovery.providers.tx_bootstrap import TxBootstrapProvider
 
 
@@ -76,15 +76,9 @@ class TxBootstrapDiscoveryTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_onboarding_resolves_each_entry_to_its_own_counterparty(self) -> None:
         provider = TxBootstrapProvider()
-        candidate = CandidateDraft(
-            provider="tx-bootstrap",
-            source_id=tx_source().id,
-            external_id="entry-1",
-            kind="dataspace-asset",
-            title="Road network",
-            payload={"spec_digest": "absent", "compiler_version": 2},
+        federated_sender = AsyncMock(
+            side_effect=[{"items": [federated_entry()]}, federated_entry()]
         )
-        federated_sender = AsyncMock(return_value=federated_entry())
         edc_sender = AsyncMock(return_value=dataset())
 
         with (
@@ -94,6 +88,7 @@ class TxBootstrapDiscoveryTestCase(unittest.IsolatedAsyncioTestCase):
             ),
             patch("wotbot.discovery.providers.edc_v3.source_json", new=edc_sender),
         ):
+            [candidate] = await provider.search(tx_source(), SearchIntent(original=""), 10)
             result = await provider.onboarding_document(
                 tx_source(),
                 candidate,
@@ -119,6 +114,11 @@ class TxBootstrapDiscoveryTestCase(unittest.IsolatedAsyncioTestCase):
             "did:web:provider.example:BPNL000000000001",
         )
         self.assertEqual(result.document["wotbot:generation"]["provider"], "tx-bootstrap")
+        self.assertGreater(candidate.payload["compiler_version"], 2)
+        self.assertEqual(
+            result.document["wotbot:generation"]["compilerVersion"],
+            candidate.payload["compiler_version"],
+        )
         self.assertEqual(
             result.document["actions"]["download_asset"]["wotbot:generatedBy"],
             "tx-bootstrap",

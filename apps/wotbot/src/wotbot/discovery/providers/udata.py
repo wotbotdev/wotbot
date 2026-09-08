@@ -20,7 +20,9 @@ portal's own index instead of to whatever happened to be on the first page.
 Each dataset becomes one Thing whose distributions become download actions.
 Resources typed ``api`` or ``documentation`` are treated as links rather than
 downloads: they appear in the TD's ``links`` and are refused by ``acquire``,
-because following them would fetch a landing page instead of data.
+because following them would fetch a landing page instead of data. Onboarding
+also reports them as suggested sources, so a dataset that only points at a
+service is a signpost to source detection rather than an affordance-less Thing.
 
 Acquisition re-reads ``GET /api/1/datasets/{id}/`` and matches the stored
 resource id, so a distribution that was withdrawn upstream fails loudly rather
@@ -132,6 +134,37 @@ def public_links(
     return tuple(links[:6])
 
 
+def service_suggestions(descriptors: list[dict[str, Any]]) -> tuple[dict[str, str], ...]:
+    """Service endpoints from this dataset worth registering as their own source.
+
+    uData types a resource ``api`` for any service endpoint, so the type says
+    where a service is, not what it speaks: across data.public.lu it covers WMS
+    capabilities and pygeoapi collections far more often than an OpenAPI
+    document. Which of them is actually supported is source detection's
+    question, because only probing the URL answers it. A dataset just reports
+    that a service exists, and documentation pages are included because a docs
+    page is often what names the specification behind the endpoint.
+    """
+
+    suggestions: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in descriptors:
+        resource_type = str(item.get("resource_type") or "").casefold()
+        url = str(item.get("url") or "")
+        if resource_type not in _LINK_RESOURCE_TYPES or not url or url in seen:
+            continue
+        seen.add(url)
+        suggestion = {
+            "url": url,
+            "title": str(item.get("title") or "Service endpoint"),
+            "kind": resource_type,
+        }
+        if format_name := str(item.get("format") or ""):
+            suggestion["format"] = format_name
+        suggestions.append(suggestion)
+    return tuple(suggestions[:5])
+
+
 class UdataProvider(DiscoveryProvider):
     name = "udata"
     capabilities = ("detect", "search", "onboard")
@@ -222,6 +255,13 @@ class UdataProvider(DiscoveryProvider):
             candidates.append((candidate, _dataset_search_text(dataset, descriptors)))
         return rank_candidates(intent, candidates, limit=limit, require_match=False)
 
+    def suggest_sources(self, candidate: CandidateDraft) -> tuple[dict[str, str], ...]:
+        raw = candidate.payload.get("resources")
+        descriptors = (
+            [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+        )
+        return service_suggestions(descriptors)
+
     async def onboarding_document(
         self,
         source: SourceDefinition,
@@ -230,14 +270,13 @@ class UdataProvider(DiscoveryProvider):
         runtime: OnboardingRuntime,
     ) -> OnboardingResult:
         del source, runtime
-        descriptors = candidate.payload.get("resources")
+        raw = candidate.payload.get("resources")
+        descriptors = (
+            [dict(item) for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+        )
         return OnboardingResult(
-            document=dataset_document(
-                candidate,
-                [dict(item) for item in descriptors if isinstance(item, dict)]
-                if isinstance(descriptors, list)
-                else [],
-            )
+            document=dataset_document(candidate, descriptors),
+            suggested_sources=self.suggest_sources(candidate),
         )
 
     async def acquire(

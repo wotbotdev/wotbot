@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, ClassVar, TypedDict
 from unittest.mock import ANY, AsyncMock, MagicMock, patch
@@ -42,6 +43,7 @@ from wotbot.discovery.providers.base import (
     provider_action_href,
     provider_download_action,
 )
+from wotbot.discovery.providers.udata import resources
 from wotbot.discovery.routes import _download_response, _registration_result
 from wotbot.discovery.search import prepare_search_intent
 from wotbot.discovery.service import DiscoveryService
@@ -607,46 +609,128 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
         ):
             await service.onboard(candidate_id="candidate", thread_id="thread-a")
 
-    async def test_existing_openapi_thing_reports_newer_compiler_as_refreshable(self) -> None:
+    async def test_onboarding_returns_service_suggestions_for_new_and_existing_datasets(
+        self,
+    ) -> None:
         service = DiscoveryService(Settings())
-        record = source_record(source_id="source-openapi", provider="openapi")
+        record = source_record()
         source = SourceDefinition(
-            id=record.id,
-            external_id=record.external_id,
-            provider="openapi",
-            title="Petstore",
-            config={"url": "https://data.example/openapi.json"},
+            id=record.id, provider=record.provider, title=record.title, config=record.config
         )
-        candidate = CandidateRecord.from_draft(
-            CandidateDraft(
-                provider="openapi",
-                source_id=record.id,
-                external_id="petstore",
-                kind="api-service",
-                title="Petstore",
-                payload={
-                    "spec_digest": "same-digest",
-                    "compiler_version": 2,
-                },
-            ),
-            scope_kind="thread",
-            scope_id="thread-a",
-        )
-        existing = thing_record(source_id=record.id, provider="openapi")
-        existing.document["wotbot:generation"] = {
-            "provider": "openapi",
-            "specificationDigest": "same-digest",
-            "compilerVersion": 1,
-        }
-        with patch.object(service, "_find_existing", return_value=existing):
-            result = await service._onboard_resource(
-                source_record=record,
-                source=source,
-                candidate=candidate,
-            )
+        suggested_url = "https://api.example/docs"
+        for already_exists in (False, True):
+            for resource_type in ("documentation", "main"):
+                with self.subTest(already_exists=already_exists, resource_type=resource_type):
+                    candidate = CandidateRecord.from_draft(
+                        CandidateDraft(
+                            provider="udata",
+                            source_id=record.id,
+                            external_id="roads",
+                            kind="dataset",
+                            title="Roads",
+                            payload={
+                                "resources": resources(
+                                    [
+                                        {
+                                            "url": suggested_url,
+                                            "title": "Road API docs",
+                                            "type": resource_type,
+                                        }
+                                    ]
+                                )
+                            },
+                        ),
+                        scope_kind="thread",
+                        scope_id="thread-a",
+                    )
+                    stored = thing_record()
+                    # Existing Things may predate the service links in the current candidate.
+                    stored = replace(stored, document={"id": stored.id, "title": "Local title"})
+                    service._candidate_store.get = AsyncMock(return_value=candidate)
+                    with (
+                        patch.object(service, "_find_source", return_value=record),
+                        patch.object(service, "_source_runtime", return_value=(source, None)),
+                        patch.object(
+                            service,
+                            "_find_existing",
+                            return_value=stored if already_exists else None,
+                        ),
+                        patch(
+                            "wotbot.discovery.service.get_session_factory", return_value=MagicMock()
+                        ),
+                        patch("wotbot.discovery.service.ThingCatalogWriteService") as writer,
+                        patch.object(
+                            PROVIDERS["udata"],
+                            "onboarding_document",
+                            wraps=PROVIDERS["udata"].onboarding_document,
+                        ) as generate,
+                    ):
+                        writer.return_value.create_discovered.return_value = (stored, True)
+                        result = await service.onboard(
+                            candidate_id="candidate", thread_id="thread-a"
+                        )
 
-        self.assertFalse(result["created"])
-        self.assertTrue(result["refresh_available"])
+                    self.assertEqual(result["created"], not already_exists)
+                    if resource_type == "documentation":
+                        self.assertEqual(
+                            result["suggested_sources"],
+                            [
+                                {
+                                    "url": suggested_url,
+                                    "title": "Road API docs",
+                                    "kind": "documentation",
+                                }
+                            ],
+                        )
+                    else:
+                        self.assertNotIn("suggested_sources", result)
+                    if already_exists:
+                        generate.assert_not_awaited()
+                        writer.assert_not_called()
+                        self.assertEqual(stored.document, {"id": stored.id, "title": "Local title"})
+                    else:
+                        generate.assert_awaited_once()
+                        writer.return_value.create_discovered.assert_called_once()
+                        written = writer.return_value.create_discovered.call_args.args[0]
+                        self.assertNotIn("suggested_sources", written)
+
+    async def test_existing_api_things_report_newer_compiler_as_refreshable(self) -> None:
+        service = DiscoveryService(Settings())
+        for provider in ("openapi", "edc-v3", "tx-bootstrap"):
+            for stored_version in (2, 3):
+                with self.subTest(provider=provider, stored_version=stored_version):
+                    record = source_record(source_id=f"source-{provider}", provider=provider)
+                    source = SourceDefinition(id=record.id, provider=provider, title="API")
+                    candidate = CandidateRecord.from_draft(
+                        CandidateDraft(
+                            provider=provider,
+                            source_id=record.id,
+                            external_id="api",
+                            kind="api-service",
+                            title="API",
+                            payload={"spec_digest": "same-digest", "compiler_version": 3},
+                        ),
+                        scope_kind="thread",
+                        scope_id="thread-a",
+                    )
+                    existing = thing_record(source_id=record.id, provider=provider)
+                    existing.document["wotbot:generation"] = {
+                        "provider": provider,
+                        "specificationDigest": "same-digest",
+                        "compilerVersion": stored_version,
+                    }
+                    with (
+                        patch.object(service, "_find_existing", return_value=existing),
+                        patch.object(PROVIDERS[provider], "onboarding_document") as generate,
+                    ):
+                        result = await service._onboard_resource(
+                            source_record=record, source=source, candidate=candidate
+                        )
+
+                    self.assertFalse(result["created"])
+                    self.assertEqual(result["refresh_available"], stored_version == 2)
+                    self.assertNotIn("suggested_sources", result)
+                    generate.assert_not_awaited()
 
     async def test_download_resolves_source_from_trusted_origin(self) -> None:
         service = DiscoveryService(Settings())

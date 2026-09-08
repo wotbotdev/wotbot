@@ -108,7 +108,7 @@ TXB_API_DESCRIPTION_URI = (
     "https://github.com/connected-intelligent-systems/tx-bootstrap/ns/apiDescription"
 )
 EDC_PROPERTIES_URI = "https://w3id.org/edc/v0.0.1/ns/properties"
-_OPENAPI_COMPILER_VERSION = 2
+_OPENAPI_COMPILER_VERSION = 3
 _MAX_OPENAPI_BYTES = 4 * 1024 * 1024
 _MAX_OPENAPI_OPERATIONS = 2_000
 _MAX_SUMMARY_OPERATIONS = 30

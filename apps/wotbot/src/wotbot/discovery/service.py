@@ -648,6 +648,9 @@ class DiscoveryService:
         source: SourceDefinition,
         candidate: CandidateRecord,
     ) -> dict[str, Any]:
+        provider = PROVIDERS.get(candidate.provider)
+        if provider is None:
+            raise ValueError("Candidate provider is unavailable")
         existing = await asyncio.to_thread(
             self._find_existing,
             provider=candidate.provider,
@@ -668,11 +671,11 @@ class DiscoveryService:
             )
             candidate_digest = str(candidate.payload.get("spec_digest") or "")
             candidate_compiler_version = candidate.payload.get("compiler_version")
-            return {
+            result: dict[str, Any] = {
                 "created": False,
                 "thing": _thing_summary(existing),
                 "refresh_available": bool(
-                    "refresh" in getattr(PROVIDERS.get(candidate.provider), "capabilities", ())
+                    "refresh" in provider.capabilities
                     and (
                         (candidate_digest and current_digest and candidate_digest != current_digest)
                         or (
@@ -682,9 +685,10 @@ class DiscoveryService:
                     )
                 ),
             }
-        provider = PROVIDERS.get(candidate.provider)
-        if provider is None:
-            raise ValueError("Candidate provider is unavailable")
+            suggested_sources = provider.suggest_sources(_candidate_draft(candidate))
+            if suggested_sources:
+                result["suggested_sources"] = [dict(item) for item in suggested_sources[:5]]
+            return result
         try:
             onboarding = await provider.onboarding_document(
                 source,
@@ -709,11 +713,16 @@ class DiscoveryService:
                     )
                 except HTTPException as exc:
                     raise ValueError(str(exc.detail)) from exc
-                return {
+                result: dict[str, Any] = {
                     "created": created,
                     "thing": _thing_summary(record),
                     "warnings": list(onboarding.warnings[:20]),
                 }
+                if onboarding.suggested_sources:
+                    result["suggested_sources"] = [
+                        dict(item) for item in onboarding.suggested_sources[:5]
+                    ]
+                return result
 
         return await asyncio.to_thread(write)
 

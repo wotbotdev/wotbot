@@ -180,7 +180,7 @@ function formSupportsOperation(form: JsonRecord, operation: AffordanceOperation)
 
 /**
  * Returns the uppercased HTTP method (htv:methodName) of the form that will be
- * used for an interaction, or undefined for non-HTTP forms / no declared method.
+ * used for an HTTP or provider interaction, or undefined for other bindings.
  *
  * When no explicit form index is resolved, node-wot selects the first form that
  * supports the operation, so we mirror that choice here.
@@ -195,6 +195,11 @@ export function getFormHttpMethod(
   const form =
     formIndex !== undefined ? forms[formIndex] : forms.find((candidate) => formSupportsOperation(candidate, operation));
   if (!isPlainObject(form)) {
+    return undefined;
+  }
+
+  const scheme = extractScheme(cleanString(form.href)) || extractScheme(cleanString(document.base));
+  if (!['http', 'https', 'wotbot+provider'].includes(scheme)) {
     return undefined;
   }
 

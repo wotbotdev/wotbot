@@ -30,6 +30,7 @@ from wotbot.discovery.providers.base import (
 )
 from wotbot.discovery.providers.edc_v3 import (
     _MAX_OPENAPI_BYTES,
+    _OPENAPI_COMPILER_VERSION,
     _dataset_metadata,
     EdcApiDescription,
     EdcV3Provider,
@@ -131,7 +132,7 @@ class TxBootstrapProvider(EdcV3Provider):
                 summary=summary,
                 payload={
                     "spec_digest": api_description.fingerprint,
-                    "compiler_version": 2,
+                    "compiler_version": _OPENAPI_COMPILER_VERSION,
                     "dataset_id": entry.dataset_id,
                     "participant_bpn": entry.participant_bpn,
                     "stale": entry.stale,

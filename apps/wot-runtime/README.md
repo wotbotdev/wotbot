@@ -24,6 +24,10 @@ wotbot agent/jobs/code-executor
 
 The service is kept on the backend network in Docker Compose. `wotbot` and `code-executor` call it through internal service URLs.
 
+For HTTP and provider-backed GET/HEAD actions, pass path and query parameters in `uri_variables`. If none are supplied, the runtime can recover matching fields from an object passed as `input`, using the Thing's declared `uriVariables`. It drops the request body and uses the resolved variables for both invocation and caching. Explicit URI variables, POST bodies, and non-HTTP binding inputs keep their existing meaning.
+
+Responses that declare JSON or tabular data but contain an HTML error page fail with `invalid_response` (HTTP 502), including previously cached pages. The check uses the original response bytes, so a valid JSON string containing HTML remains data. Declared HTML/XML responses, plain text, and unknown binary formats remain supported.
+
 ## Development
 
 ### With Docker Compose

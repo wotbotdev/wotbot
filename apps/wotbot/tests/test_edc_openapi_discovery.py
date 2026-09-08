@@ -133,7 +133,7 @@ def candidate_for(value: dict) -> CandidateDraft:
         kind="dataspace-api" if metadata.summary else "dataspace-asset",
         title="Search result title",
         summary="Search result description",
-        payload={"spec_digest": metadata.fingerprint, "compiler_version": 2},
+        payload={"spec_digest": metadata.fingerprint, "compiler_version": 3},
     )
 
 
@@ -280,6 +280,11 @@ class EdcApiDescriptionOnboardingTestCase(unittest.IsolatedAsyncioTestCase):
         validate_document(result.document)
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].kind, "dataspace-api")
+        self.assertGreater(candidates[0].payload["compiler_version"], 2)
+        self.assertEqual(
+            result.document["wotbot:generation"]["compilerVersion"],
+            candidates[0].payload["compiler_version"],
+        )
         self.assertEqual(
             set(candidates[0].payload),
             {"spec_digest", "compiler_version"},

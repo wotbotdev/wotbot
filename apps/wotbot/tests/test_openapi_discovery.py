@@ -206,6 +206,92 @@ class OpenApiCompilerTestCase(unittest.TestCase):
         self.assertEqual(properties["nickname"]["type"], "string")
         self.assertNotIn("type", properties["ambiguous"])
 
+    def test_keeps_optional_parameters_written_as_a_nullable_union(self) -> None:
+        """OpenAPI 3.1 spells an optional parameter as ``anyOf: [T, null]``.
+
+        Every FastAPI and Pydantic specification emits that shape, and reading
+        it as non-primitive dropped the parameter, leaving an action that could
+        not be given the argument its operation is about.
+        """
+
+        document = api_document()
+        document["paths"]["/pets/0/{petId}"]["get"]["parameters"].extend(
+            [
+                {
+                    "name": "city",
+                    "in": "query",
+                    "schema": {
+                        "anyOf": [{"type": "integer"}, {"type": "null"}],
+                        "title": "City",
+                    },
+                },
+                {
+                    "name": "lat",
+                    "in": "query",
+                    "schema": {
+                        "anyOf": [
+                            {"type": "number", "minimum": -90, "maximum": 90},
+                            {"type": "null"},
+                        ]
+                    },
+                },
+            ]
+        )
+
+        parsed = parsed_api(document)
+        self.assertEqual([line for line in parsed.warnings if "parameter" in line], [])
+        td, _warnings = compile_thing(
+            source(),
+            parsed,
+            operation_groups(parsed.operations)[0],
+            "nullable-union",
+        )
+
+        action = td["actions"]["getPet"]
+        variables = action["uriVariables"]
+        self.assertEqual(variables["city"]["type"], "integer")
+        self.assertEqual(variables["city"]["title"], "City")
+        self.assertEqual(variables["lat"]["type"], "number")
+        self.assertEqual((variables["lat"]["minimum"], variables["lat"]["maximum"]), (-90, 90))
+        self.assertIn("city", action["forms"][0]["href"])
+        self.assertIn("lat", action["forms"][0]["href"])
+
+    def test_a_union_of_real_variants_is_kept_as_a_union(self) -> None:
+        document = api_document()
+        document["components"]["schemas"]["Pet"]["properties"]["age"] = {
+            "anyOf": [{"type": "integer"}, {"type": "string"}, {"type": "null"}]
+        }
+
+        parsed = parsed_api(document)
+        td, _warnings = compile_thing(
+            source(), parsed, operation_groups(parsed.operations)[0], "union"
+        )
+
+        age = td["actions"]["getPet"]["output"]["properties"]["age"]
+        self.assertEqual([variant["type"] for variant in age["anyOf"]], ["integer", "string"])
+        self.assertNotIn("type", age)
+
+    def test_a_schema_without_a_const_does_not_claim_one(self) -> None:
+        """``const: null`` asserts the value must be null, so never invent it."""
+
+        document = api_document()
+        document["components"]["schemas"]["Pet"]["properties"].update(
+            {
+                "colour": {"type": "string", "enum": ["red", "blue"]},
+                "exact": {"type": "string", "const": "fixed"},
+            }
+        )
+
+        parsed = parsed_api(document)
+        td, _warnings = compile_thing(
+            source(), parsed, operation_groups(parsed.operations)[0], "const"
+        )
+
+        properties = td["actions"]["getPet"]["output"]["properties"]
+        self.assertNotIn("const", properties["colour"])
+        self.assertNotIn("default", properties["colour"])
+        self.assertEqual(properties["exact"]["const"], "fixed")
+
     def test_groups_more_than_thirty_operations_by_tag(self) -> None:
         parsed = parsed_api(api_document(operation_count=31))
         groups = operation_groups(parsed.operations)
@@ -380,13 +466,123 @@ class OpenApiProviderTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(detected.external_id, "https://docs.example.test/final.json")
         self.assertNotIn("paths", json.dumps(detected.config))
         self.assertTrue(any("Detected OpenAPI" in item for item in context.evidence))
+        client.get.assert_awaited_once()
+
+    async def test_api_base_detection_preserves_prefix_and_uses_final_spec_url(self) -> None:
+        for status, final_base in (
+            (404, "https://api.example.test/api/v1"),
+            (404, "https://api.example.test/api/v1/"),
+            (405, "https://api.example.test/api/v1"),
+            (200, "https://api.example.test/api/v1.0?view=summary#top"),
+        ):
+            with self.subTest(status=status, final_base=final_base):
+                base_path = final_base.split("?", 1)[0].rstrip("/")
+                spec_url = f"{base_path}/openapi.json"
+                canonical_url = "https://api.example.test/specs/current.json"
+                client = AsyncMock()
+                client.get.side_effect = [
+                    HttpPayload(final_base, status, "application/json", b'{"status":"ok"}', {}),
+                    HttpPayload(
+                        canonical_url,
+                        200,
+                        "application/json",
+                        json.dumps(api_document()).encode(),
+                        {},
+                    ),
+                ]
+                context = DetectionContext(url="https://api.example.test/start", http=client)
+                with patch("wotbot.discovery.providers.openapi.resolve_public", new=AsyncMock()):
+                    detected = await OpenApiProvider().inspect_public(context)
+                assert detected is not None
+                self.assertEqual(detected.external_id, canonical_url)
+                self.assertEqual(detected.config["url"], canonical_url)
+                self.assertEqual(
+                    [call.args[0] for call in client.get.await_args_list],
+                    [context.url, spec_url],
+                )
+
+    async def test_swagger_fallback_validates_each_response_without_following_more_links(
+        self,
+    ) -> None:
+        base = "https://api.example.test/v1"
+        swagger = {
+            "swagger": "2.0",
+            "info": {"title": "Weather API", "version": "1"},
+            "host": "api.example.test",
+            "basePath": "/v1",
+            "schemes": ["https"],
+            "paths": {},
+        }
+        for status, body in (
+            (404, b""),
+            (200, b'{"status":"ok"}'),
+            (200, b'<html><script>SwaggerUIBundle({url: "/other.json"})</script></html>'),
+        ):
+            with self.subTest(status=status, body=body):
+                client = AsyncMock()
+                client.get.side_effect = [
+                    HttpPayload(base, 404, "text/plain", b"", {}),
+                    HttpPayload(f"{base}/openapi.json", status, "text/html", body, {}),
+                    HttpPayload(
+                        f"{base}/swagger.json",
+                        200,
+                        "application/json",
+                        json.dumps(swagger).encode(),
+                        {},
+                    ),
+                ]
+                with patch("wotbot.discovery.providers.openapi.resolve_public", new=AsyncMock()):
+                    detected = await OpenApiProvider().inspect_public(
+                        DetectionContext(url=base, http=client)
+                    )
+                assert detected is not None
+                self.assertEqual(detected.external_id, f"{base}/swagger.json")
+                self.assertEqual(
+                    [call.args[0] for call in client.get.await_args_list],
+                    [base, f"{base}/openapi.json", f"{base}/swagger.json"],
+                )
+
+    async def test_missing_conventional_specs_stop_after_two_extra_probes(self) -> None:
+        base = "https://api.example.test/v1"
+        urls = [base, f"{base}/openapi.json", f"{base}/swagger.json"]
+        client = AsyncMock()
+        client.get.side_effect = [HttpPayload(url, 404, "text/plain", b"", {}) for url in urls]
+        detected = await OpenApiProvider().inspect_public(DetectionContext(url=base, http=client))
+        self.assertIsNone(detected)
+        self.assertEqual([call.args[0] for call in client.get.await_args_list], urls)
+
+    async def test_explicit_documents_and_other_http_errors_do_not_probe_base_paths(self) -> None:
+        cases = [(status, "/v1") for status in (401, 403, 429, 500, 503)]
+        cases += [
+            (status, f"/spec.{extension}")
+            for status in (200, 404)
+            for extension in ("json", "yaml", "yml", "html", "rdf")
+        ]
+        for status, path in cases:
+            with self.subTest(status=status, path=path):
+                url = f"https://api.example.test{path}"
+                client = AsyncMock()
+                client.get.return_value = HttpPayload(url, status, "text/plain", b"missing", {})
+                detected = await OpenApiProvider().inspect_public(
+                    DetectionContext(url=url, http=client)
+                )
+                self.assertIsNone(detected)
+                client.get.assert_awaited_once()
 
     async def test_empty_query_browses_groups_and_candidate_is_bounded(self) -> None:
         provider = OpenApiProvider()
         parsed = parsed_api(api_document(operation_count=31))
         with patch.object(provider, "_load", new=AsyncMock(return_value=parsed)):
             candidates = await provider.search(source(), SearchIntent(original=""), 10)
+            result = await provider.onboarding_document(
+                source(), candidates[0], runtime=AsyncMock()
+            )
         self.assertEqual(len(candidates), 2)
+        self.assertGreater(candidates[0].payload["compiler_version"], 2)
+        self.assertEqual(
+            result.document["wotbot:generation"]["compilerVersion"],
+            candidates[0].payload["compiler_version"],
+        )
         serialized = json.dumps([candidate.payload for candidate in candidates])
         self.assertNotIn('"paths"', serialized)
         self.assertIn("spec_digest", serialized)
