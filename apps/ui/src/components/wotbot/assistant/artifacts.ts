@@ -1,7 +1,10 @@
+import type { ThreadMessageLike } from '@assistant-ui/react';
+
 import {
   artifactKey,
   normalizeRunCodeResult,
   type RunCodeArtifact,
+  type RunCodeResult,
 } from '@/components/wotbot/chat-tool-call-model';
 import {
   enrichArtifactForPinning,
@@ -12,6 +15,126 @@ import type { LangChainMessage } from '@/lib/thread-messages';
 
 export type LiveModeWebArtifact = WebInterfaceArtifact & { kind: 'web' };
 export type LiveModeArtifact = RunCodeArtifact | LiveModeWebArtifact;
+
+export type ConversationArtifact = {
+  artifact: LiveModeArtifact;
+  messageId: string;
+};
+
+export type ConversationFile = {
+  artifact: RunCodeArtifact & { kind: 'file' };
+  messageId: string;
+};
+
+export function messageAnchor(messageId: string): string {
+  return `message-${encodeURIComponent(messageId)}`;
+}
+
+/** Collect the displayed conversation, keeping each output's original message. */
+export function conversationArtifacts(
+  messages: readonly ThreadMessageLike[],
+): ConversationArtifact[] {
+  return collectConversationArtifacts(messages, normalizeRunCodeResult, true);
+}
+
+function collectConversationArtifacts(
+  messages: readonly ThreadMessageLike[],
+  readCodeResult: typeof normalizeRunCodeResult,
+  includeWeb: boolean,
+): ConversationArtifact[] {
+  const entries: ConversationArtifact[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    if (
+      message.role !== 'assistant' ||
+      !message.id ||
+      typeof message.content === 'string'
+    ) {
+      continue;
+    }
+    for (const part of message.content) {
+      if (
+        part.type !== 'tool-call' ||
+        part.result === undefined ||
+        part.isError
+      )
+        continue;
+      let artifacts: LiveModeArtifact[] = [];
+      if (part.toolName === 'run_code') {
+        const result = readCodeResult(part.result);
+        if (!result.error) artifacts = result.artifacts ?? [];
+      } else if (includeWeb && part.toolName === 'create_web_interface') {
+        const result = normalizeWebInterfaceResult(part.result);
+        if (result.artifact && !result.error) {
+          artifacts = [
+            {
+              ...enrichArtifactForPinning(result.artifact, part.args),
+              kind: 'web',
+            },
+          ];
+        }
+      }
+      // Only original tool calls are indexed; synthetic display parts repeat them.
+      for (const artifact of artifacts) {
+        const key = artifactKey(artifact);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ artifact, messageId: message.id });
+      }
+    }
+  }
+  return entries.reverse();
+}
+
+/** Downloadable files from the whole conversation, newest first. */
+export function conversationFiles(
+  messages: readonly ThreadMessageLike[],
+): ConversationFile[] {
+  return collectConversationFiles(messages, normalizeRunCodeResult);
+}
+
+function collectConversationFiles(
+  messages: readonly ThreadMessageLike[],
+  readCodeResult: typeof normalizeRunCodeResult,
+): ConversationFile[] {
+  return collectConversationArtifacts(messages, readCodeResult, false).filter(
+    (entry): entry is ConversationFile => entry.artifact.kind === 'file',
+  );
+}
+
+/** Keep the file popover out of token updates that do not change its contents. */
+export function createConversationFilesSelector() {
+  const results = new WeakMap<object, RunCodeResult>();
+  let previousMessages: readonly ThreadMessageLike[] | undefined;
+  let previous: ConversationFile[] = [];
+
+  const readCodeResult: typeof normalizeRunCodeResult = (result) => {
+    if (!result || typeof result !== 'object')
+      return normalizeRunCodeResult(result);
+    let parsed = results.get(result);
+    if (!parsed) {
+      parsed = normalizeRunCodeResult(result);
+      results.set(result, parsed);
+    }
+    return parsed;
+  };
+
+  return (messages: readonly ThreadMessageLike[]): ConversationFile[] => {
+    if (messages === previousMessages) return previous;
+    const next = collectConversationFiles(messages, readCodeResult);
+    previousMessages = messages;
+    if (
+      next.length !== previous.length ||
+      next.some(
+        (entry, i) =>
+          entry.messageId !== previous[i].messageId ||
+          entry.artifact !== previous[i].artifact,
+      )
+    )
+      previous = next;
+    return previous;
+  };
+}
 
 /**
  * Artifacts produced since the last user message.

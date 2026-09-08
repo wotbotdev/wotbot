@@ -87,13 +87,13 @@ class IntentClassification(BaseModel):
     )
 
 
-def _strip_wot_calls(message: BaseMessage) -> BaseMessage:
-    """Remove ``wot_calls`` from ToolMessage content before sending to the LLM.
+def _strip_ui_tool_data(message: BaseMessage) -> BaseMessage:
+    """Remove UI-only tool data from the copy sent to the LLM.
 
     ``wot_calls`` are only needed by the UI to render device-interaction
-    summaries.  They stay in the persisted graph state (so the frontend still
-    receives them) but are stripped from the prompt to avoid blowing up the
-    context with raw sensor data.
+    summaries. File storage IDs and URIs are used by download cards, but are
+    not browser links the model should include in its answer. These fields
+    stay in the persisted graph state so the frontend still receives them.
     """
     if not isinstance(message, ToolMessage):
         return message
@@ -104,9 +104,18 @@ def _strip_wot_calls(message: BaseMessage) -> BaseMessage:
         parsed = json.loads(content)
     except (json.JSONDecodeError, TypeError):
         return message
-    if not isinstance(parsed, dict) or "wot_calls" not in parsed:
+    if not isinstance(parsed, dict):
         return message
     stripped = {k: v for k, v in parsed.items() if k != "wot_calls"}
+    if message.name == "run_code" and isinstance(parsed.get("artifacts"), list):
+        stripped["artifacts"] = [
+            {k: v for k, v in artifact.items() if k not in {"id", "uri", "content_uri"}}
+            if isinstance(artifact, dict) and artifact.get("kind") == "file"
+            else artifact
+            for artifact in parsed["artifacts"]
+        ]
+    if stripped == parsed:
+        return message
     return message.model_copy(update={"content": json.dumps(stripped)})
 
 
@@ -205,7 +214,7 @@ def _trim_conversation(messages: Sequence[BaseMessage], max_tokens: int) -> list
     # can carry megabytes of them. Trimming on the un-stripped messages let that
     # invisible data consume the whole budget and evict the real conversation.
     prepared = [
-        _strip_wot_calls(message)
+        _strip_ui_tool_data(message)
         for message in without_device_interaction_summary_messages(messages)
     ]
     # Repair tool_call/ToolMessage pairing BEFORE grouping into eviction units

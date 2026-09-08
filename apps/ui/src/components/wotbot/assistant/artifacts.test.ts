@@ -1,7 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { latestTurnArtifacts } from './artifacts';
+import {
+  conversationArtifacts,
+  conversationFiles,
+  createConversationFilesSelector,
+  latestTurnArtifacts,
+} from './artifacts';
+import {
+  createThreadMessageConverter,
+  toThreadMessages,
+  type LangChainMessage,
+} from '@/lib/thread-messages';
+import { artifactKey } from '../chat-tool-call-model';
 
 test('latestTurnArtifacts includes and enriches voice-created panels', () => {
   const artifacts = latestTurnArtifacts([
@@ -86,4 +97,242 @@ test('latestTurnArtifacts still includes plots from only the latest turn', () =>
   assert.deepEqual(artifacts, [
     { ref: 'chart_2', kind: 'plotly', filename: 'new-chart.json' },
   ]);
+});
+
+test('conversation artifacts span turns and link to the displayed source message without duplicate display parts', () => {
+  const file = {
+    kind: 'file',
+    id: 'file-first.csv',
+    filename: 'data.csv',
+    ref: 'file_1',
+  };
+  const messages: LangChainMessage[] = [
+    { type: 'human', id: 'human-1', content: 'Export a table' },
+    { type: 'ai', id: 'turn-1', content: 'I will export the table.' },
+    {
+      type: 'ai',
+      id: 'step-2',
+      tool_calls: [{ id: 'export-1', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'export-1',
+      content: JSON.stringify({ artifacts: [file] }),
+    },
+    {
+      type: 'human',
+      id: 'human-2',
+      content: 'Export another table and a chart',
+    },
+    {
+      type: 'ai',
+      id: 'turn-2',
+      tool_calls: [{ id: 'export-2', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'export-2',
+      content: {
+        artifacts: [
+          file,
+          { ...file, id: 'file-second.csv' },
+          { kind: 'plotly', ref: 'chart_1', filename: 'plot.json' },
+        ],
+      },
+    },
+  ];
+  const entries = conversationArtifacts(toThreadMessages(messages));
+  assert.deepEqual(
+    entries.map(({ artifact, messageId }) => [
+      artifactKey(artifact),
+      messageId,
+    ]),
+    [
+      ['plotly:plot.json', 'turn-2'],
+      ['file:file-second.csv', 'turn-2'],
+      ['file:file-first.csv', 'turn-1'],
+    ],
+  );
+  // Editing away the second turn also removes its outputs from the drawer.
+  assert.equal(
+    conversationArtifacts(toThreadMessages(messages.slice(0, 4))).length,
+    1,
+  );
+});
+
+test('conversation artifacts ignore unfinished and failed tools and retain panel previews', () => {
+  const entries = conversationArtifacts(
+    toThreadMessages([
+      { type: 'human', id: 'human-1', content: 'Create some outputs' },
+      {
+        type: 'ai',
+        id: 'turn-1',
+        tool_calls: [
+          { id: 'pending', name: 'run_code', args: {} },
+          { id: 'failed', name: 'run_code', args: {} },
+          {
+            id: 'panel',
+            name: 'create_web_interface',
+            args: { title: 'Overview', html: '<p>Overview</p>' },
+          },
+        ],
+      },
+      {
+        type: 'tool',
+        tool_call_id: 'failed',
+        status: 'error',
+        content: {
+          artifacts: [
+            { kind: 'image', ref: 'image_1', filename: 'failed.png' },
+          ],
+        },
+      },
+      {
+        type: 'tool',
+        tool_call_id: 'panel',
+        content: {
+          artifacts: [
+            {
+              kind: 'web',
+              ref: 'ui_1',
+              filename: 'panel.html',
+              capabilities: [],
+            },
+          ],
+        },
+      },
+    ]),
+  );
+  assert.deepEqual(entries, [
+    {
+      messageId: 'turn-1',
+      artifact: {
+        kind: 'web',
+        ref: 'ui_1',
+        filename: 'panel.html',
+        capabilities: [],
+        title: 'Overview',
+        html: '<p>Overview</p>',
+      },
+    },
+  ]);
+  assert.deepEqual(conversationArtifacts([]), []);
+});
+
+test('conversation files keep only downloadable artifacts, newest first', () => {
+  const entries = conversationFiles(
+    toThreadMessages([
+      { type: 'human', id: 'human-1', content: 'Export the readings' },
+      {
+        type: 'ai',
+        id: 'turn-1',
+        tool_calls: [{ id: 'export-1', name: 'run_code', args: {} }],
+      },
+      {
+        type: 'tool',
+        tool_call_id: 'export-1',
+        content: {
+          artifacts: [
+            { kind: 'plotly', ref: 'chart_1', filename: 'plot.json' },
+            { kind: 'image', ref: 'image_1', filename: 'shot.png' },
+            {
+              kind: 'file',
+              ref: 'file_1',
+              id: 'file-first',
+              filename: 'readings.csv',
+            },
+          ],
+        },
+      },
+      { type: 'human', id: 'human-2', content: 'And the summary' },
+      {
+        type: 'ai',
+        id: 'turn-2',
+        tool_calls: [{ id: 'export-2', name: 'run_code', args: {} }],
+      },
+      {
+        type: 'tool',
+        tool_call_id: 'export-2',
+        content: {
+          artifacts: [
+            {
+              kind: 'file',
+              ref: 'file_1',
+              id: 'file-second',
+              filename: 'summary.csv',
+            },
+          ],
+        },
+      },
+    ]),
+  );
+  assert.deepEqual(
+    entries.map(({ artifact, messageId }) => [artifact.id, messageId]),
+    [
+      ['file-second', 'turn-2'],
+      ['file-first', 'turn-1'],
+    ],
+  );
+  assert.deepEqual(conversationFiles([]), []);
+});
+
+test('file selector stays stable during text streaming and updates on changed or removed results', () => {
+  const convert = createThreadMessageConverter();
+  const selectFiles = createConversationFilesSelector();
+  const history: LangChainMessage[] = [
+    { type: 'human', id: 'h1', content: 'Export' },
+    {
+      type: 'ai',
+      id: 'a1',
+      tool_calls: [{ id: 'c1', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'c1',
+      content: {
+        artifacts: [
+          { kind: 'file', id: 'file-1', ref: 'file_1', filename: 'data.csv' },
+        ],
+      },
+    },
+    { type: 'ai', id: 'a2', content: 'Saved' },
+  ];
+  const first = selectFiles(convert(history));
+  assert.equal(first.length, 1);
+  const streamed = convert([
+    ...history.slice(0, -1),
+    { ...history.at(-1), content: 'Saved the file.' },
+  ]);
+  assert.strictEqual(selectFiles(streamed), first);
+  assert.strictEqual(selectFiles(streamed), first);
+  const changed = selectFiles(
+    convert([
+      ...history.slice(0, 2),
+      {
+        ...history[2],
+        content: {
+          artifacts: [
+            {
+              kind: 'file',
+              id: 'file-1',
+              ref: 'file_1',
+              filename: 'renamed.csv',
+              expires_at: '2026-09-15T14:00:00Z',
+            },
+          ],
+        },
+      },
+    ]),
+  );
+  assert.notStrictEqual(changed, first);
+  assert.equal(changed[0].artifact.filename, 'renamed.csv');
+  assert.equal(changed[0].artifact.expires_at, '2026-09-15T14:00:00Z');
+  assert.deepEqual(selectFiles(convert(history.slice(0, 2))), []);
+  assert.equal(selectFiles(convert(history)).length, 1);
+  assert.deepEqual(
+    selectFiles(
+      convert([...history.slice(0, 2), { ...history[2], status: 'error' }]),
+    ),
+    [],
+  );
 });

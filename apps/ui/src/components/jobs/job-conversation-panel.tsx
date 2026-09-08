@@ -11,7 +11,11 @@ import { MessageSquareReply } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { WotbotThread } from '@/components/wotbot/assistant/thread';
-import { toThreadMessages, type LangChainMessage } from '@/lib/thread-messages';
+import {
+  createThreadMessageConverter,
+  identityThreadMessage,
+  type LangChainMessage,
+} from '@/lib/thread-messages';
 import { JobEventTimeline } from '@/components/jobs/job-event-timeline';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -54,11 +58,15 @@ export function JobTranscript({
   isWaiting: boolean;
   waitingQuestion?: string | null;
 }) {
-  const threadMessages = useMemo(() => toThreadMessages(messages), [messages]);
+  const [convertMessages] = useState(createThreadMessageConverter);
+  const threadMessages = useMemo(
+    () => convertMessages(messages),
+    [convertMessages, messages],
+  );
 
   const runtime = useExternalStoreRuntime<ThreadMessageLike>({
     messages: threadMessages,
-    convertMessage: (message) => message,
+    convertMessage: identityThreadMessage,
     isDisabled: true,
     onNew: async () => {
       // Read-only: the composer is replaced by the notice bar below.

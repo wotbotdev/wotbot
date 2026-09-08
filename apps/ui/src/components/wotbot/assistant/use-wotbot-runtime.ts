@@ -25,7 +25,10 @@ import {
   RUN_RECOVERY_DELAYS_MS,
   loadSettledThreadState,
 } from '@/lib/thread-state';
-import { toThreadMessages } from '@/lib/thread-messages';
+import {
+  createThreadMessageConverter,
+  identityThreadMessage,
+} from '@/lib/thread-messages';
 
 function appendedText(content: readonly { type: string }[]): string {
   return content
@@ -215,15 +218,17 @@ export function useWotbotRuntime({
   // what renders until then. Once a run starts, the backend's `values` frames
   // carry the full accumulated state, so the stream becomes authoritative and
   // this falls away.
-  const messages = useMemo(() => {
-    const streamedValues = stream.values as Partial<WotbotState>;
-    const streamed = Array.isArray(streamedValues.messages)
+  const [convertMessages] = useState(createThreadMessageConverter);
+  const streamedValues = stream.values as Partial<WotbotState>;
+  const sourceMessages =
+    reconciledValues?.messages ??
+    (Array.isArray(streamedValues.messages)
       ? streamedValues.messages
-      : null;
-    const source =
-      reconciledValues?.messages ?? streamed ?? initialValues.messages;
-    return toThreadMessages(source);
-  }, [initialValues.messages, reconciledValues, stream.values]);
+      : initialValues.messages);
+  const messages = useMemo(
+    () => convertMessages(sourceMessages),
+    [convertMessages, sourceMessages],
+  );
 
   const submitText = useCallback(
     (text: string, replaceFromId?: string | null) => {
@@ -354,7 +359,7 @@ export function useWotbotRuntime({
     messages,
     isRunning: stream.isLoading,
     isSendDisabled: isRecovering,
-    convertMessage: (message) => message,
+    convertMessage: identityThreadMessage,
     onNew: async (message) => {
       submitText(appendedText(message.content));
     },
