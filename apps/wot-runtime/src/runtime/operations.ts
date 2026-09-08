@@ -356,7 +356,13 @@ export async function handleInvokeAction(request: any): Promise<any> {
 
   const resolvedFormIndex = (() => {
     try {
-      return resolveFormIndex(document, actionName, 'invokeaction', request?.formSelector);
+      return resolveFormIndex(
+        document,
+        actionName,
+        'invokeaction',
+        request?.formSelector,
+        getServient().getClientSchemes(),
+      );
     } catch (error) {
       throw createRuntimeError('invalid_argument', formatError(error));
     }
@@ -390,7 +396,9 @@ export async function handleInvokeAction(request: any): Promise<any> {
   }
 
   const isCacheable = isCacheableSafeAction(actionDef);
-  const cacheKey = isCacheable ? buildCacheKey(thingId, 'invoke_action', actionName, uriVariables, input) : '';
+  const cacheKey = isCacheable
+    ? buildCacheKey(thingId, 'invoke_action', actionName, uriVariables, input, resolvedFormIndex)
+    : '';
 
   if (isCacheable) {
     const cached = await getCached(cacheKey);
@@ -405,11 +413,9 @@ export async function handleInvokeAction(request: any): Promise<any> {
     }
   }
 
-  const result = await (
-    input === undefined
-      ? thing.invokeAction(actionName, undefined, options)
-      : thing.invokeAction(actionName, input, options)
-  ).catch((error: unknown) => interactionError('InvokeAction', thingId, actionName, error));
+  const result = await thing
+    .invokeAction(actionName, input, options)
+    .catch((error: unknown) => interactionError('InvokeAction', thingId, actionName, error));
 
   if (result) {
     const payload = await encodeInteractionOutputPayload(result, {

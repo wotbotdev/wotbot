@@ -23,8 +23,9 @@ export function buildCacheKey(
   affordanceName: string,
   uriVariables?: Record<string, unknown>,
   input?: unknown,
+  formIndex?: number,
 ): string {
-  const params = JSON.stringify({ u: uriVariables ?? null, i: input ?? null }, (_key, value) =>
+  const params = JSON.stringify({ u: uriVariables ?? null, i: input ?? null, f: formIndex }, (_key, value) =>
     isPlainObject(value) ? sortObject(value) : value,
   );
   const hash = crypto.createHash('sha256').update(params).digest('hex').slice(0, 16);

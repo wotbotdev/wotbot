@@ -25,6 +25,7 @@ from wotbot.discovery.providers.openapi import (
     ParsedApi,
     collect_operations,
     compile_thing,
+    declared_spec_url,
     group_external_id,
     openapi_version,
     operation_groups,
@@ -442,6 +443,40 @@ class OpenApiCompilerTestCase(unittest.TestCase):
         self.assertFalse(operations)
         self.assertTrue(any("unsupported" in warning for warning in warnings))
         self.assertTrue(any("incompatible" in warning for warning in operation_warnings))
+
+
+class OpenApiDocsTestCase(unittest.TestCase):
+    def test_documentation_accepts_quoted_configuration_keys_and_spaced_attributes(self) -> None:
+        for markup in (
+            '<script>SwaggerUIBundle({"url": "/v1/openapi.json"})</script>',
+            "<script>SwaggerUIBundle({'url': '/v1/openapi.json'})</script>",
+            '<link rel = "service-desc" href = "/v1/openapi.json">',
+            '<link href = "/v1/openapi.json" rel = "service-desc">',
+            '<redoc spec-url = "/v1/openapi.json"></redoc>',
+        ):
+            with self.subTest(markup=markup):
+                payload = HttpPayload(
+                    "https://api.example/docs", 200, "text/html", markup.encode(), {}
+                )
+                self.assertEqual(declared_spec_url(payload), "https://api.example/v1/openapi.json")
+
+    def test_invalid_and_unrelated_links_do_not_hide_a_valid_specification(self) -> None:
+        for invalid in (
+            "https://api.example:bad/openapi.json",
+            "https://[broken/openapi.json",
+            "https://name:secret@api.example/openapi.json",
+            "https://unrelated.example/openapi.json",
+            "javascript:openapi.json",
+        ):
+            with self.subTest(invalid=invalid):
+                markup = (
+                    f'<link rel="service-desc" href="{invalid}">'
+                    '<link rel="service-desc" href="/v1/openapi.json">'
+                )
+                payload = HttpPayload(
+                    "https://api.example/docs", 200, "text/html", markup.encode(), {}
+                )
+                self.assertEqual(declared_spec_url(payload), "https://api.example/v1/openapi.json")
 
 
 class OpenApiProviderTestCase(unittest.IsolatedAsyncioTestCase):

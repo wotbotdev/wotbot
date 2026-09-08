@@ -404,11 +404,11 @@ class OpenApiProvider(DiscoveryProvider):
 _MAX_DOCS_SCAN = 262_144
 _DECLARED_SPEC_PATTERNS = (
     # The registered link relation for an API description.
-    re.compile(r"""rel=["']service-desc["'][^>]*?href=["']([^"']{1,2048})["']""", re.I),
-    re.compile(r"""href=["']([^"']{1,2048})["'][^>]*?rel=["']service-desc["']""", re.I),
+    re.compile(r"""rel\s*=\s*["']service-desc["'][^>]*?href\s*=\s*["']([^"']{1,2048})["']""", re.I),
+    re.compile(r"""href\s*=\s*["']([^"']{1,2048})["'][^>]*?rel\s*=\s*["']service-desc["']""", re.I),
     # ReDoc names it on the element; Swagger UI passes it in its config object.
     re.compile(r"""spec-?url\s*[=:]\s*["']([^"']{1,2048})["']""", re.I),
-    re.compile(r"""\burl\s*:\s*["']([^"']{1,2048})["']""", re.I),
+    re.compile(r"""(?:\burl|["']url["'])\s*:\s*["']([^"']{1,2048})["']""", re.I),
 )
 
 
@@ -426,16 +426,20 @@ def declared_spec_url(payload: HttpPayload) -> str | None:
     into fetching an unrelated host.
     """
 
-    if "html" not in payload.content_type:
+    if "html" not in payload.content_type.casefold():
         return None
     text = payload.text()[:_MAX_DOCS_SCAN]
     expected = origin_of(payload.url)
     for pattern in _DECLARED_SPEC_PATTERNS:
         for match in pattern.finditer(text):
-            candidate = urljoin(payload.url, html.unescape(match.group(1).strip()))
-            if not _looks_like_specification(urlparse(candidate).path.casefold()):
-                continue
-            if origin_of(candidate) != expected:
+            try:
+                candidate = urljoin(payload.url, html.unescape(match.group(1).strip()))
+                if not is_http_endpoint(candidate) or origin_of(candidate) != expected:
+                    continue
+                if not _looks_like_specification(urlparse(candidate).path.casefold()):
+                    continue
+            except ValueError:
+                # A malformed link must not hide a later valid declaration.
                 continue
             return candidate
     return None

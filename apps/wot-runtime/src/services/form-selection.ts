@@ -178,12 +178,16 @@ function formSupportsOperation(form: JsonRecord, operation: AffordanceOperation)
   return operations.length === 0 || operations.includes(operation);
 }
 
+function formScheme(document: ThingDescription, form: JsonRecord): string {
+  return extractScheme(cleanString(form.href)) || extractScheme(cleanString(document.base));
+}
+
 /**
  * Returns the uppercased HTTP method (htv:methodName) of the form that will be
  * used for an HTTP or provider interaction, or undefined for other bindings.
  *
- * When no explicit form index is resolved, node-wot selects the first form that
- * supports the operation, so we mirror that choice here.
+ * Callers choosing among different bindings should resolve the form index first.
+ * Without an index, this uses the first form that supports the operation.
  */
 export function getFormHttpMethod(
   document: ThingDescription,
@@ -198,8 +202,7 @@ export function getFormHttpMethod(
     return undefined;
   }
 
-  const scheme = extractScheme(cleanString(form.href)) || extractScheme(cleanString(document.base));
-  if (!['http', 'https', 'wotbot+provider'].includes(scheme)) {
+  if (!['http', 'https', 'wotbot+provider'].includes(formScheme(document, form))) {
     return undefined;
   }
 
@@ -255,12 +258,14 @@ function formMatchesSelector(
 /**
  * Resolves a form index from a Thing Description based on a form selector.
  * Throws an error if a selector was provided but no form matched it.
- * Returns undefined if no selector was provided (letting node-wot choose the best form).
+ * Without a selector, chooses the first supported form when available schemes are
+ * supplied, or returns undefined to leave the choice to node-wot.
  *
  * @param document The Thing Description.
  * @param affordanceName The name of the affordance.
  * @param operation The operation being performed.
  * @param formSelector The untrusted form selector object from the request.
+ * @param supportedSchemes Available bindings for resolving a default form.
  * @returns The matched form index or undefined.
  * @throws {Error} if a selector was provided but no match was found.
  */
@@ -269,13 +274,25 @@ export function resolveFormIndex(
   affordanceName: string,
   operation: AffordanceOperation,
   formSelector: unknown,
+  supportedSchemes?: readonly string[],
 ): number | undefined {
   const selector = normalizeFormSelector(formSelector);
+  const forms = getAffordanceForms(document, affordanceName, operation);
   if (!selector) {
-    return undefined;
+    if (!supportedSchemes) {
+      return undefined;
+    }
+    const defaultIndex = forms.findIndex(
+      (form) => formSupportsOperation(form, operation) && supportedSchemes.includes(formScheme(document, form)),
+    );
+    if (defaultIndex >= 0) {
+      return defaultIndex;
+    }
+    throw new Error(
+      `No supported form for '${operation}' on Thing '${thingIdFromDocument(document)}' affordance '${affordanceName}'`,
+    );
   }
 
-  const forms = getAffordanceForms(document, affordanceName, operation);
   const matchedIndex = forms.findIndex((form, index) => formMatchesSelector(form, index, selector, operation));
 
   if (matchedIndex >= 0) {

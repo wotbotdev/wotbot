@@ -134,6 +134,35 @@ test('runtime gives explicit URI variables precedence over body fields', async (
   assert.deepEqual(decodePayloadEnvelope(result.completedResult.payload), { query: { city: '34' }, body: null });
 });
 
+test('runtime recovers GET parameters after skipping an unsupported binding', async () => {
+  document.actions.query.forms.unshift({
+    href: 'unsupported://api/query',
+    op: ['invokeaction'],
+    'htv:methodName': 'POST',
+    contentType: 'application/json',
+  });
+  const result = await invoke({ city: 12 });
+  assert.deepEqual(decodePayloadEnvelope(result.completedResult.payload), { query: { city: '12' }, body: null });
+  assert.equal(received[0].method, 'GET');
+});
+
+test('cached action results remain separate for different forms', async () => {
+  document.actions.query.forms.push({
+    ...document.actions.query.forms[0],
+    href: `${base}/query?variant=alternate{&city,language}`,
+  });
+  const first = await invoke({ city: 12 });
+  const alternate = await invoke({ city: 12 }, undefined, 1);
+  const repeat = await invoke(undefined, { city: 12 }, 0);
+  assert.deepEqual(decodePayloadEnvelope(alternate.completedResult.payload), {
+    query: { variant: 'alternate', city: '12' },
+    body: null,
+  });
+  assert.deepEqual(repeat, first);
+  assert.equal(received.length, 2);
+  assert.equal(cache.size, 2);
+});
+
 test('selecting a POST form preserves its body even when fields also name URI variables', async () => {
   document.actions.query.safe = false;
   document.actions.query.input = { type: 'object', required: ['city'], properties: { city: { type: 'integer' } } };
@@ -168,7 +197,7 @@ test('runtime rejects mislabelled HTML in actions and properties before caching 
 
 test('runtime rejects HTML already present in the response cache', async () => {
   cache.set(
-    buildCacheKey(document.id, 'invoke_action', 'query', {}, undefined),
+    buildCacheKey(document.id, 'invoke_action', 'query', {}, undefined, 0),
     JSON.stringify({
       contentType: 'application/json',
       payload: Buffer.from('<html>Error</html>').toString('base64'),
