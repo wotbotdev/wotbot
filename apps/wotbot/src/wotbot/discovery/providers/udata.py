@@ -41,6 +41,7 @@ from wotbot.discovery.detection import DetectionContext, origin
 from wotbot.discovery.errors import (
     ProviderError,
     SourceProtocolError,
+    SourceResponseTooLargeError,
 )
 from wotbot.discovery.http import BoundedHttpClient
 from wotbot.discovery.models import (
@@ -67,6 +68,7 @@ _FORMAT_MEDIA_TYPES = {
     "json": "application/json",
 }
 _LINK_RESOURCE_TYPES = {"api", "documentation"}
+_SEARCH_REQUEST_LIMIT = 10
 
 
 def resources(value: Any, *, limit: int = 20) -> list[dict[str, Any]]:
@@ -169,6 +171,10 @@ class UdataProvider(DiscoveryProvider):
     name = "udata"
     capabilities = ("detect", "search", "onboard")
     detect_priority = 50
+    # Resource histories can make even a small dataset page several MiB.
+    # Shrink oversized pages while retaining the per-response byte cap.
+    public_max_bytes = 4 * 1024 * 1024
+    public_max_requests = _SEARCH_REQUEST_LIMIT + 2  # Allow a couple of redirects.
     config = ProviderConfigSpec(
         fields=frozenset({"url", "portal_url"}),
         url_fields=("url",),
@@ -221,18 +227,35 @@ class UdataProvider(DiscoveryProvider):
         public_http: BoundedHttpClient | None = None,
     ) -> list[CandidateDraft]:
         root = origin(str(source.get("url")))
-        page_size = min(max(limit * 2, 10), 50)
+        page_size = 10
+        remaining_requests = _SEARCH_REQUEST_LIMIT
         datasets: dict[str, dict[str, Any]] = {}
         for query in udata_queries(intent):
-            url = f"{root}/api/1/datasets/?{urlencode({'q': query, 'page_size': page_size})}"
-            payload = await self._json(source, url, public_http=public_http)
-            if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
-                raise SourceProtocolError("uData API returned an invalid dataset listing")
-            for dataset in items(payload):
-                external_id = str(dataset.get("id") or dataset.get("slug") or "").strip()
-                if external_id:
-                    datasets.setdefault(external_id, dataset)
-            if len(datasets) >= limit:
+            offset = 0
+            while remaining_requests:
+                # Rounding down can repeat a dataset after a page-size change;
+                # deduplication below preserves it without skipping any records.
+                page = offset // page_size + 1
+                params = urlencode({"q": query, "page_size": page_size, "page": page})
+                url = f"{root}/api/1/datasets/?{params}"
+                remaining_requests -= 1
+                try:
+                    payload = await self._json(source, url, public_http=public_http)
+                except SourceResponseTooLargeError:
+                    if page_size == 1 or not remaining_requests:
+                        raise
+                    page_size = max(1, page_size // 2)
+                    continue
+                if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+                    raise SourceProtocolError("uData API returned an invalid dataset listing")
+                for dataset in items(payload):
+                    external_id = str(dataset.get("id") or dataset.get("slug") or "").strip()
+                    if external_id:
+                        datasets.setdefault(external_id, dataset)
+                if len(datasets) >= limit or not payload["data"] or not payload.get("next_page"):
+                    break
+                offset = page * page_size
+            if len(datasets) >= limit or not remaining_requests:
                 break
 
         candidates: list[tuple[CandidateDraft, str]] = []

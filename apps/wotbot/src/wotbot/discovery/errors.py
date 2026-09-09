@@ -35,6 +35,10 @@ class SourceProtocolError(ProviderError):
     """A source answered, but with content this provider cannot use."""
 
 
+class SourceResponseTooLargeError(SourceProtocolError):
+    """A response exceeded the HTTP client's byte budget."""
+
+
 class SourceConfigurationError(ProviderError):
     """A stored source record cannot be turned into a usable runtime source.
 
@@ -102,6 +106,7 @@ __all__ = [
     "SourceConfigurationError",
     "SourceConflictError",
     "SourceProtocolError",
+    "SourceResponseTooLargeError",
     "SourceUnavailableError",
     "StaleCandidateError",
     "UnsafeUrlError",

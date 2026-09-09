@@ -36,7 +36,11 @@ from urllib.parse import ParseResult, urljoin, urlparse
 import aiohttp
 from aiohttp.abc import AbstractResolver
 
-from wotbot.discovery.errors import SourceProtocolError, UnsafeUrlError
+from wotbot.discovery.errors import (
+    SourceProtocolError,
+    SourceResponseTooLargeError,
+    UnsafeUrlError,
+)
 
 Mode = Literal["public", "trusted"]
 
@@ -316,10 +320,10 @@ async def bounded_body(response: aiohttp.ClientResponse, max_bytes: int) -> byte
 
     declared = response.content_length
     if declared is not None and declared > max_bytes:
-        raise SourceProtocolError("Source response is too large")
+        raise SourceResponseTooLargeError("Source response is too large")
     body = bytearray()
     async for chunk in response.content.iter_chunked(65_536):
         body.extend(chunk)
         if len(body) > max_bytes:
-            raise SourceProtocolError("Source response is too large")
+            raise SourceResponseTooLargeError("Source response is too large")
     return bytes(body)

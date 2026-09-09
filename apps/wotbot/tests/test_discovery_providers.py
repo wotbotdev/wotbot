@@ -12,10 +12,11 @@ import json
 import pathlib
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from wotbot.discovery.errors import (
     SourceProtocolError,
+    SourceResponseTooLargeError,
     SourceUnavailableError,
     UnsafeUrlError,
 )
@@ -575,6 +576,58 @@ class UdataParsingTestCase(unittest.TestCase):
 
 
 class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_oversized_pages_shrink_without_skipping_or_repeating_candidates(self) -> None:
+        source = udata_source()
+        datasets = [{"id": str(i), "title": f"Dataset {i}"} for i in range(13)]
+        requested: list[tuple[int, int]] = []
+
+        async def fake_json(_self: object, _source: object, url: str, **_kw: object) -> object:
+            self.assertEqual(urlparse(url).netloc, "data.example")
+            params = parse_qs(urlparse(url).query)
+            page_size = int(params["page_size"][0])
+            page = int(params["page"][0])
+            requested.append((page, page_size))
+            offset = (page - 1) * page_size
+            page_data = datasets[offset : offset + page_size]
+            # Four adjacent datasets have large resource histories. The first
+            # five fit, but the next five require a smaller page size.
+            if sum(1 for item in page_data if 5 <= int(item["id"]) <= 8) > 3:
+                raise SourceResponseTooLargeError("Source response is too large")
+            return {
+                "data": page_data,
+                "next_page": "https://other.example/ignored" if offset + page_size < 13 else None,
+            }
+
+        with patch.object(UdataProvider, "_json", new=fake_json):
+            results = await UdataProvider().search(source, prepare_search_intent("", source), 25)
+
+        self.assertCountEqual([item.external_id for item in results], map(str, range(13)))
+        self.assertIn((2, 5), requested)
+        # Offset 5 does not align with pages of two: revisit offset 4, then deduplicate.
+        self.assertIn((3, 2), requested)
+        self.assertLessEqual(len(requested), 10)
+
+    async def test_repeated_pages_cannot_exceed_the_search_request_budget(self) -> None:
+        source = udata_source()
+        response = {
+            "data": [{"id": "roads", "title": "Roads"}],
+            "next_page": "https://data.example/always-more",
+        }
+        with patch.object(UdataProvider, "_json", new=AsyncMock(return_value=response)) as fetch:
+            results = await UdataProvider().search(source, prepare_search_intent("", source), 25)
+
+        self.assertEqual([item.external_id for item in results], ["roads"])
+        self.assertEqual(fetch.await_count, 10)
+
+    async def test_other_protocol_errors_are_not_retried_as_oversized_pages(self) -> None:
+        source = udata_source()
+        with patch.object(
+            UdataProvider, "_json", new=AsyncMock(side_effect=SourceProtocolError("invalid JSON"))
+        ) as fetch:
+            with self.assertRaisesRegex(SourceProtocolError, "invalid JSON"):
+                await UdataProvider().search(source, prepare_search_intent("", source), 25)
+        fetch.assert_awaited_once()
+
     async def test_the_query_reaches_the_backend_instead_of_being_filtered_locally(self) -> None:
         source = udata_source()
         payload = {

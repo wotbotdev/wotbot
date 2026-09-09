@@ -594,7 +594,9 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
         with patch("wotbot.discovery.service.BoundedHttpClient") as client:
             _source, public_http = service._source_runtime(source_record())
             self.assertIs(public_http, client.return_value)
-            client.assert_called_once_with(mode="public", max_requests=5, max_bytes=1_048_576)
+            client.assert_called_once_with(
+                mode="public", max_requests=12, max_bytes=4 * 1024 * 1024
+            )
 
             client.reset_mock()
             edc_record = SourceRecord(
@@ -619,6 +621,62 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
             _source, public_http = service._source_runtime(edc_record)
             self.assertIs(public_http, client.return_value)
             client.assert_called_once_with(mode="public", max_requests=128, max_bytes=1_048_576)
+
+    async def test_udata_response_budget_accepts_large_pages_but_still_limits_reads(self) -> None:
+        # Dataset listings include resource histories and other metadata that
+        # can exceed the generic public probe's 1 MiB cap on real uData portals.
+        for metadata_bytes, accepted in ((2 * 1024 * 1024, True), (4 * 1024 * 1024, False)):
+            body = json.dumps(
+                {
+                    "data": [
+                        {
+                            "id": "roads",
+                            "title": "Road network",
+                            "resources": [{"id": "csv", "url": "https://data.example/roads.csv"}],
+                            "extras": {"metadata": "x" * metadata_bytes},
+                        }
+                    ]
+                }
+            ).encode()
+            for declared_length in (len(body), None):
+                with self.subTest(metadata_bytes=metadata_bytes, declared_length=declared_length):
+                    service = DiscoveryService(Settings())
+                    record = source_record()
+                    service._candidate_store.put_many = AsyncMock(return_value=["candidate-a"])
+                    response = MagicMock(
+                        status=200,
+                        headers={"Content-Type": "application/json"},
+                        content_length=declared_length,
+                        url="https://data.example/api/1/datasets/",
+                    )
+                    session = MagicMock()
+
+                    async def chunks(size):
+                        for offset in range(0, len(body), size):
+                            yield body[offset : offset + size]
+
+                    response.content.iter_chunked = chunks
+                    with (
+                        patch.object(service, "_find_source", return_value=record),
+                        patch.object(
+                            BoundedHttpClient,
+                            "_open",
+                            new=AsyncMock(return_value=(session, response)),
+                        ) as opened,
+                    ):
+                        result = await service.discover(
+                            source_id=record.id, query="", limit=25, thread_id="thread-a"
+                        )
+                    attempts = 1 if accepted else 4  # Page sizes 10, 5, 2, then 1.
+                    self.assertEqual(opened.await_count, attempts)
+                    self.assertEqual(session.__aexit__.await_count, attempts)
+                    self.assertEqual(response.__aexit__.await_count, attempts)
+                    if accepted:
+                        self.assertEqual(result["items"][0]["title"], "Road network")
+                        service._candidate_store.put_many.assert_awaited_once()
+                    else:
+                        self.assertEqual(result["status"], "source_unavailable")
+                        service._candidate_store.put_many.assert_not_awaited()
 
     async def test_onboarding_rejects_deleted_or_cross_provider_sources(self) -> None:
         service = DiscoveryService(Settings())
