@@ -37,20 +37,46 @@ docker compose up -d
 
 The root Compose files are compatibility wrappers around the canonical stack in [`deploy/compose.yaml`](./deploy/compose.yaml) and its local development override in [`deploy/compose.override.yaml`](./deploy/compose.override.yaml).
 
-## Agent-to-Agent (A2A) Integration
+## A2A and MCP
 
-Enable `A2A_ENABLED=true` to let external agents use WoTBot through the official
-A2A 1.0 HTTP+JSON interface. It shares the existing assistant graph and services;
-A2A conversations stay outside the chat UI. Generated panels are saved in Panels
-and returned as a link.
+External agents can use WoTBot to discover, control, analyze, and automate Things.
+Enable either connection type in `.env`, then recreate the API service with
+`docker compose up -d --no-deps wotbot`:
 
-Execution requires an API key with `agent:invoke`. Set `REGISTRY_PUBLIC_URL` and
-`PUBLIC_UI_ORIGIN` to the externally reachable backend and UI origins. The public
-Agent Card is at `/.well-known/agent-card.json`.
+```dotenv
+A2A_ENABLED=true
+MCP_ENABLED=true
+REGISTRY_PUBLIC_URL=http://localhost:8123
+PUBLIC_UI_ORIGIN=http://localhost:3000
+```
 
-See the [inbound A2A guide](./docs/a2a.md) for configuration, request and
-continuation examples, artifact formats, and rollout checks.
-The experimental `/api/a2a` endpoints have been retired.
+Use backend and UI URLs reachable by your client. Create an API key with
+`agent:invoke` and send it as `Authorization: Bearer <api-key>`. This grants the
+agent access to enabled capabilities, including device actions and job creation.
+
+| Connection | URL on the backend | Use it for |
+| --- | --- | --- |
+| A2A 1.0 HTTP+JSON | `/.well-known/agent-card.json` | Discover WoTBot and connect with an A2A client |
+| MCP Streamable HTTP | `/mcp/assistant` | Ask WoTBot to handle a request; start here for most clients |
+| MCP Streamable HTTP | `/mcp/intents` | Choose a specific assistant intent |
+| MCP Streamable HTTP | `/mcp/raw` | Let your own agent choose and call tools directly |
+
+A2A requests use the `A2A-Version: 1.0` header. MCP clients discover tools and
+their arguments through `tools/list`; all three profiles include task and
+artifact tools.
+
+Keep the same `messageId` (A2A) or `requestId` (MCP) when retrying identical work
+so actions are not repeated. Reuse the returned `contextId` to continue a
+conversation. Each API key owns its tasks and conversations; raw contexts are
+separate from assistant conversations, and external conversations stay out of
+the chat UI. A disconnect leaves work running; use task cancellation to stop it.
+
+Files include temporary download links; retrieve the task or artifact again to
+refresh an expired link. Generated panels are saved in Panels and returned with
+a `panelUrl` that opens the normal WoTBot UI under its existing access controls.
+
+Run one API execution process per database. Additional origin and retention
+settings are listed in [`.env.example`](./.env.example).
 
 ## External discovery
 
@@ -144,5 +170,3 @@ check before building images and rejects tag/version drift.
 - [`.env.example`](./.env.example): documented environment template.
 - [`VERSION`](./VERSION): shared stack version used by all service manifests.
 - [`LICENSE`](./LICENSE): project license.
-
-WoTBot also offers [three MCP toolsets](./docs/mcp.md): assistant, intent, and raw tools, selected by connection URL with `MCP_ENABLED=true`.

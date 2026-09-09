@@ -60,27 +60,14 @@ Live voice uses a self-hosted LiveKit Server plus the `wotbot livekit-agent` wor
 
 ## A2A and MCP
 
-The opt-in A2A 1.0 HTTP+JSON interface uses the official SDK and the existing
-LangGraph assistant. One Agent Card advertises `chat`, `control`, `analysis`,
-`jobs`, `virtual_things`, and `discovery`; the router selects the intent.
+See [A2A and MCP setup](../../README.md#a2a-and-mcp) for connection URLs,
+authentication, and how to retrieve results.
 
-`A2A_ENABLED=true` enables the public `/.well-known/agent-card.json`, authenticated
-`/a2a/v1` execution/task routes, and `/a2a/artifacts` downloads. API keys need
-`agent:invoke`, which delegates all enabled assistant capabilities. Contexts,
-tasks, and downloads are isolated by API-key ID. A2A threads remain hidden from chat.
-File and image outputs include temporary download links usable by browsers
-without an API key. Links expire after one hour by default; retrieving the task
-refreshes them. Canonical download URLs still require the owning API key.
-
-The shared execution lifecycle lives in `core/agent_runs.py`. Chat retains its
-SSE adapter in `threads/runs.py`; A2A consumes typed events directly. Durable A2A
-records live in `agent_api/models.py`. The single `0008_agent_execution`
-migration creates the shared A2A/MCP schema after `0007_add_thing_origin`. Generated
-panels use the existing panel service and immutable initial panel versions.
-
-See the [connection and rollout guide](../../docs/a2a.md) for examples, ownership,
-pauses, artifact formats, and retention. The experimental
-`/api/a2a` routes and handwritten protocol models have been removed.
+Both interfaces run in this API service. Shared execution and persistence live
+in [`agent_api`](./src/wotbot/agent_api); [`a2a`](./src/wotbot/a2a) and
+[`mcp`](./src/wotbot/mcp) adapt their respective protocols. Assistant calls use
+the existing LangGraph assistant; raw MCP calls execute tools directly. Generated
+panels use the existing panel service and are returned as links to the UI.
 
 ## Persistence And Migrations
 
