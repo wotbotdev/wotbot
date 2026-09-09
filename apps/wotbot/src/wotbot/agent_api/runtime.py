@@ -23,6 +23,7 @@ from wotbot.agent_api.types import (
     TaskState,
     TaskStatusUpdateEvent,
 )
+from wotbot.auth.providers import get_agent_principal
 from wotbot.core.agent_runs import (
     RunRegistry,
     _finalize_interrupted_run,
@@ -138,16 +139,7 @@ class AgentRuntime:
         await asyncio.to_thread(self.store.release_execution_lease)
 
     def _key_authorized(self, owner: str) -> bool:
-        from wotbot.api_keys.models import ApiKey
-
-        with self.store.session_factory() as session:
-            key = session.get(ApiKey, owner)
-            return bool(
-                key
-                and key.is_active
-                and "agent:invoke" in (key.scopes or [])
-                and (key.expires_at is None or key.expires_at > utc_now())
-            )
+        return get_agent_principal(owner, session_factory=self.store.session_factory) is not None
 
     async def admit(self, owner: str, params) -> Admission:
         Invocation.model_validate(params)
@@ -248,7 +240,6 @@ class AgentRuntime:
                 collector = self.collector_factory(
                     owner=owner, task_id=task.id, thread_id=thread_id
                 )
-            collector = getattr(collector, "neutral", collector)
             text = "\n".join(
                 p.get("text", json.dumps(p.get("data"), ensure_ascii=False))
                 for p in message["parts"]
@@ -368,13 +359,16 @@ class AgentRuntime:
                 await watcher
 
     async def subscribe(
-        self, owner: str, task_id: str, *, terminal_error=False, history_length=None
+        self, owner: str, task_id: str, *, terminal_error=False, history_length=None, family=None
     ):
         queue = asyncio.Queue(maxsize=256)
         try:
             # Atomically take the durable snapshot and join future broadcasts.
+            # The family check reads the same row under the same lock: an await
+            # ahead of it would let a fast runner reach a terminal state before
+            # this listener joined, leaving the stream with no updates at all.
             async with self.event_locks.thread_lock(task_id):
-                task = await asyncio.to_thread(self.store.get, owner, task_id)
+                task = await asyncio.to_thread(self.store.get, owner, task_id, family)
                 if terminal_error and TaskState.Name(task.status.state) not in RESERVED:
                     raise UnsupportedOperationError("Use GetTask to retrieve a terminal task")
                 self.listeners[task_id].add(queue)
@@ -411,9 +405,9 @@ class AgentRuntime:
             if not self.listeners[task_id]:
                 self.listeners.pop(task_id, None)
 
-    async def cancel(self, owner: str, task_id: str) -> Task:
+    async def cancel(self, owner: str, task_id: str, *, family=None) -> Task:
         async with self.admission_lock:
-            task = await asyncio.to_thread(self.store.get, owner, task_id)
+            task = await asyncio.to_thread(self.store.get, owner, task_id, family)
             if TaskState.Name(task.status.state) not in RESERVED:
                 raise TaskNotCancelableError()
             runner = self.runners.get(task_id)
@@ -429,7 +423,7 @@ class AgentRuntime:
                 operation = await asyncio.to_thread(self.store.operation, owner, task_id)
                 graph = self.raw_graph if operation.family == "raw" else self.graph
                 await _finalize_interrupted_run(graph, thread_id)
-            task = await asyncio.to_thread(self.store.get, owner, task_id)
+            task = await asyncio.to_thread(self.store.get, owner, task_id, family)
             if stopped_runner and TaskState.Name(task.status.state) not in RESERVED:
                 # The runner's own cancellation path already recorded why it
                 # stopped; a second terminal transition would only overwrite it.
@@ -442,13 +436,13 @@ class AgentRuntime:
             )
             return task
 
-    async def wait(self, owner, task_id, seconds=0):
+    async def wait(self, owner, task_id, seconds=0, *, family=None):
         if seconds:
             try:
                 async with asyncio.timeout(seconds):
-                    async with aclosing(self.subscribe(owner, task_id)) as events:
+                    async with aclosing(self.subscribe(owner, task_id, family=family)) as events:
                         async for _ in events:
                             pass
             except TimeoutError:
                 pass
-        return await asyncio.to_thread(self.store.get, owner, task_id)
+        return await asyncio.to_thread(self.store.get, owner, task_id, family)

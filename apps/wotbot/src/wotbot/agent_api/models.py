@@ -59,10 +59,17 @@ class AgentTaskRecord(Base):
 
 
 class AgentMessageRecord(Base):
-    """Owner-wide retry identity, including messages that resume other tasks."""
+    """Retry identity within one family, including messages that resume tasks.
+
+    Assistant conversations and raw tool contexts are separate surfaces, so the
+    same ``messageId`` may be in flight on each without colliding.
+    """
 
     __tablename__ = "a2a_messages"
     owner: Mapped[str] = mapped_column(Text, primary_key=True)
+    family: Mapped[str] = mapped_column(
+        Text, primary_key=True, default="assistant", server_default="assistant"
+    )
     message_id: Mapped[str] = mapped_column(Text, primary_key=True)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     task_id: Mapped[str] = mapped_column(

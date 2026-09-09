@@ -118,3 +118,73 @@ def test_invalid_response_is_uncertain_and_not_retried(body):
         with pytest.raises(CodeExecutionUncertainError):
             asyncio.run(CodeExecutorClient(settings()).execute(session_id="test", code="pass"))
     assert len(attempts) == 1
+
+
+@pytest.mark.parametrize("limit", [4, 6])
+def test_artifact_read_enforces_actual_size_and_closes_stream(limit):
+    class Content(httpx.AsyncByteStream):
+        closed = False
+
+        async def __aiter__(self):
+            for chunk in (b"ab", b"cd", b"ef"):
+                yield chunk
+
+        async def aclose(self):
+            self.closed = True
+
+    content = Content()
+
+    def download(request):
+        assert request.headers["Authorization"] == "Bearer test-execution-policy"
+        assert request.url.raw_path == b"/artifacts/chart%20name.png/content"
+        # A preview must enforce its byte budget even when metadata underreports size.
+        return httpx.Response(200, headers={"Content-Length": "1"}, stream=content)
+
+    real_client = httpx.AsyncClient
+    with patch(
+        "wotbot.clients.code_executor.httpx.AsyncClient",
+        side_effect=lambda **kw: real_client(transport=httpx.MockTransport(download), **kw),
+    ):
+        read = CodeExecutorClient(settings()).read_artifact("chart name.png", max_bytes=limit)
+        if limit < 6:
+            with pytest.raises(ValueError, match="size limit"):
+                asyncio.run(read)
+        else:
+            assert asyncio.run(read) == b"abcdef"
+    assert content.closed
+
+
+def test_cancelled_artifact_read_closes_upstream():
+    async def run():
+        started = asyncio.Event()
+
+        class Content(httpx.AsyncByteStream):
+            closed = False
+
+            async def __aiter__(self):
+                yield b"first"
+                started.set()
+                await asyncio.Event().wait()
+
+            async def aclose(self):
+                self.closed = True
+
+        content = Content()
+        real_client = httpx.AsyncClient
+        with patch(
+            "wotbot.clients.code_executor.httpx.AsyncClient",
+            side_effect=lambda **kw: real_client(
+                transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=content)),
+                **kw,
+            ),
+        ):
+            task = asyncio.create_task(
+                CodeExecutorClient(settings()).read_artifact("image.png", max_bytes=100)
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert content.closed
+
+    asyncio.run(run())

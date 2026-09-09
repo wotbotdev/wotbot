@@ -75,6 +75,24 @@ def get_api_key_user_from_token(token: str, *, session_factory=None) -> User | N
         )
 
 
+def get_agent_principal(owner: str, *, session_factory=None, auth_type="api_key") -> User | None:
+    """Recheck a stored invoking key without the original token or a last-used write."""
+    from wotbot.api_keys.models import ApiKey
+
+    with (session_factory or get_session_factory())() as session:
+        key = session.get(ApiKey, owner)
+        if not key or not key.is_active or "agent:invoke" not in (key.scopes or []):
+            return None
+        if key.expires_at is not None and key.expires_at <= utc_now():
+            return None
+        return User(
+            user_id=key.user_id,
+            api_key_id=owner,
+            auth_type=auth_type,
+            scopes=["agent:invoke"],
+        )
+
+
 def get_current_user(request: Request) -> User | None:
     service_user = _get_service_user(request)
     if service_user is not None:

@@ -6,22 +6,24 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
-from urllib.parse import quote
 from uuid import NAMESPACE_URL, uuid5
 
-import httpx
 from langchain_core.messages import AIMessage, ToolMessage
 from sqlalchemy import select
 
 from wotbot.agent_api.artifacts import ArtifactStore
-from wotbot.agent_api.constants import MCP_APP_MIME_TYPE
 from wotbot.agent_api.types import Artifact, Part
+from wotbot.clients.code_executor import CodeExecutorClient
 from wotbot.core.database import get_session_factory
 from wotbot.core.time import utc_now
 from wotbot.panels.models import PanelVersion
 from wotbot.panels.service import PanelService
 
 logger = logging.getLogger(__name__)
+
+# A generated panel is delivered as a pointer to the panel the UI serves, not
+# as the markup itself.
+PANEL_MEDIA_TYPE = "application/vnd.wotbot.panel+json"
 
 
 def json_part(data):
@@ -39,60 +41,17 @@ def _executor_identifier(item: dict) -> str:
     return identifier
 
 
-def _executor_url(settings, identifier: str, suffix: str) -> str:
-    return (
-        f"{settings.code_executor_url.rstrip('/')}/artifacts/{quote(identifier, safe='')}{suffix}"
-    )
-
-
-def executor_headers(settings) -> dict[str, str]:
-    return (
-        {"Authorization": f"Bearer {settings.internal_api_key}"}
-        if settings.internal_api_key
-        else {}
-    )
-
-
 async def fetch_artifact_metadata(settings, item: dict) -> dict:
-    """Describe an exported artifact without copying it.
-
-    The executor already stores the bytes with its own retention, so A2A keeps
-    only what it needs to advertise and authorize a download: identity, type,
-    size and the moment the bytes actually disappear.
-    """
-    identifier = _executor_identifier(item)
-    async with httpx.AsyncClient(timeout=settings.code_executor_timeout_seconds) as client:
-        response = await client.get(
-            _executor_url(settings, identifier, "/metadata"), headers=executor_headers(settings)
-        )
-        response.raise_for_status()
-        descriptor = response.json()
-    if not isinstance(descriptor, dict) or not descriptor.get("expires_at"):
-        raise ValueError("Executor returned an unusable artifact descriptor")
-    return {**descriptor, "id": identifier}
+    """Describe the executor's export without copying its bytes."""
+    return await CodeExecutorClient(settings).artifact_metadata(_executor_identifier(item))
 
 
 async def fetch_plotly_figure(settings, item: dict) -> dict:
-    """Read a Plotly figure so it can travel inline in the artifact.
-
-    The only class whose bytes are still read: a figure is small, and a client
-    that cannot follow the download URL still needs the data to render.
-    """
-    identifier = _executor_identifier(item)
-    async with httpx.AsyncClient(timeout=settings.code_executor_timeout_seconds) as client:
-        async with client.stream(
-            "GET",
-            _executor_url(settings, identifier, "/content"),
-            headers=executor_headers(settings),
-        ) as response:
-            response.raise_for_status()
-            content = bytearray()
-            async for chunk in response.aiter_bytes():
-                content.extend(chunk)
-                if len(content) > settings.a2a_max_artifact_bytes:
-                    raise ValueError("Export exceeds A2A_MAX_ARTIFACT_BYTES")
-    # A mislabeled HTML response is an export failure.
-    return json.loads(bytes(content))
+    """Read bounded Plotly JSON for clients that render the figure inline."""
+    content = await CodeExecutorClient(settings).read_artifact(
+        _executor_identifier(item), max_bytes=settings.a2a_max_artifact_bytes
+    )
+    return json.loads(content)
 
 
 class ArtifactCollector:
@@ -274,8 +233,6 @@ class ArtifactCollector:
         return Artifact(artifact_id=artifact_id, name=name, parts=parts, metadata=metadata)
 
     async def _panel(self, artifact_id, inputs, result):
-        from wotbot.mcp_apps.render import panel_ui_metadata
-
         existing = await self.store.get(artifact_id, owner=self.owner)
         if existing:
             descriptor = existing.artifact_metadata["descriptor"]
@@ -309,27 +266,18 @@ class ArtifactCollector:
                 "panelId": panel["id"],
                 "panelVersionId": version_id,
                 "panelUrl": f"{self.settings.public_ui_origin.rstrip('/')}/panels?panelId={panel['id']}",
-                "mcpServerUrl": self.settings.registry_public_url.rstrip("/") + "/mcp/apps",
-                "toolName": f"panel.open.{artifact_id}",
-                "resourceUri": f"ui://wotbot/generated/{artifact_id}",
             }
             # The markup and its capability allowlist live in the pinned panel
-            # version; the document is re-wrapped from there on read, so the
-            # panel picks up later bridge and CSP fixes instead of freezing the
-            # ones in force when it was generated. `ui` is cached here only as
-            # a listing hint -- reads recompute it alongside the document.
+            # version; this artifact only points at it, so the panel picks up
+            # later renderer fixes instead of freezing the ones in force when it
+            # was generated.
             await self.store.put(
                 artifact_id=artifact_id,
                 task_id=self.task_id,
                 owner=self.owner,
                 name=panel["title"],
-                media_type=MCP_APP_MIME_TYPE,
-                metadata={
-                    "bridgeVersion": 2,
-                    "panelVersionId": version_id,
-                    "ui": panel_ui_metadata(self.settings, html),
-                    "descriptor": descriptor,
-                },
+                media_type=PANEL_MEDIA_TYPE,
+                metadata={"panelVersionId": version_id, "descriptor": descriptor},
             )
             logger.info(
                 "Saved A2A panel=%s version=%s artifact=%s task=%s",

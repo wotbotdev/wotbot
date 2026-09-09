@@ -64,7 +64,7 @@ class AgentAppRoutesTestCase(unittest.TestCase):
 
         fake_saver = object()
         fake_graph = FakeGraph()
-        fake_settings = Settings(agent_handoff_enabled=True, a2a_enabled=False)
+        fake_settings = Settings(agent_handoff_enabled=True, a2a_enabled=False, mcp_enabled=False)
         fake_job_service = AsyncMock()
 
         async def exercise() -> None:

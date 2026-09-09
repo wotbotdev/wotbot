@@ -1,50 +1,19 @@
 """Local acceptance fixtures only; no real credentials or device connections."""
 
-import os
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 
-from wotbot.core.settings import Settings
-from wotbot.mcp_apps.assets import router
-from wotbot.mcp_apps.render import wrap_mcp_app_document
 from wotbot.panels.render import wrap_panel_document
 
 ROOT = Path(__file__).resolve().parent
 app = FastAPI()
-app.include_router(router)
 
 
 @app.get("/")
-def host():
-    return FileResponse(ROOT / "mcp-host.html")
-
-
-@app.get("/normal")
 def normal_host():
     return FileResponse(ROOT / "normal-host.html")
-
-
-@app.get("/proxy")
-def proxy():
-    return FileResponse(ROOT / "mcp-proxy.html")
-
-
-@app.get("/host.js")
-def host_js():
-    return FileResponse(os.environ["MCP_HOST_BUNDLE"], media_type="text/javascript")
-
-
-@app.get("/panel")
-def panel():
-    return HTMLResponse(
-        wrap_mcp_app_document(
-            (ROOT / "panel-fixture.html").read_text(),
-            "Test panel",
-            settings=Settings(registry_public_url="http://localhost:8918"),
-        )
-    )
 
 
 @app.get("/normal-panel")

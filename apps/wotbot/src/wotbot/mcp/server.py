@@ -6,9 +6,7 @@ import json
 import logging
 from datetime import datetime
 
-import httpx
 from jsonschema import Draft202012Validator
-from mcp.server.apps import client_supports_apps
 from mcp.shared.exceptions import MCPError
 from mcp.types import (
     INVALID_PARAMS,
@@ -27,16 +25,11 @@ from wotbot.agent_api.catalog import argument_schema, public_tools, validate_arg
 from wotbot.agent_api.downloads import ArtifactDownloadLinks
 from wotbot.agent_api.errors import AgentError
 from wotbot.agent_api.types import Operation, TaskQuery
-from wotbot.mcp_apps.server import (
-    PANEL_CALL_TOOL,
-    PANEL_TOOL_PREFIX,
-    MCPPanelRuntime,
-    _panel_call_tool,
-    _panel_open_tool,
-    _request_user,
-    _tool_error,
-)
+from wotbot.clients.code_executor import CodeExecutorClient
+from wotbot.core.cursors import decode_cursor, encode_cursor
+from wotbot.mcp.runtime import MCPServerRuntime, request_user, tool_error
 
+PAGE_SIZE = 50
 ID = {"type": "string", "minLength": 1, "maxLength": 200}
 WAIT = {"type": "number", "minimum": 0, "maximum": 30, "default": 25}
 COMMON = {"requestId": ID, "contextId": ID, "waitSeconds": WAIT}
@@ -134,7 +127,7 @@ def profile_tools(profile):
         ),
         (
             "artifact.get",
-            "Retrieve an owned artifact with fresh temporary download links. Open generated panels using their panel.open tool.",
+            "Retrieve an owned artifact with fresh temporary download links.",
             schema({"artifactId": ID}, ["artifactId"]),
         ),
         (
@@ -168,19 +161,23 @@ def profile_tools(profile):
     return {tool.name: tool for tool in tools}
 
 
-class MCPToolRuntime(MCPPanelRuntime):
+class MCPToolRuntime(MCPServerRuntime):
     def __init__(self, *, profile, get_runtime, **kwargs):
         self.profile = profile
         self.get_runtime = get_runtime
         self.tools = profile_tools(profile)
-        super().__init__(path="/mcp/" + profile, **kwargs)
-        self.downloads = ArtifactDownloadLinks(self.settings, artifact_store=self.artifact_store)
-        self.server.instructions = (
-            "Execution calls return a completed result, an input request, or a durable task handle. "
-            "Use task.get to wait again, task.resume for pending replies, and task.cancel to stop. "
-            "Connections do not own task lifetime. Keep requestId unchanged for an identical retry. "
-            "Every context belongs to this API key; raw contexts are separate from assistant conversations."
+        super().__init__(
+            path="/mcp/" + profile,
+            title="WoTBot " + profile.capitalize(),
+            instructions=(
+                "Execution calls return a completed result, an input request, or a durable task handle. "
+                "Use task.get to wait again, task.resume for pending replies, and task.cancel to stop. "
+                "Connections do not own task lifetime. Keep requestId unchanged for an identical retry. "
+                "Every context belongs to this API key; raw contexts are separate from assistant conversations."
+            ),
+            **kwargs,
         )
+        self.downloads = ArtifactDownloadLinks(self.settings, artifact_store=self.artifact_store)
 
     @property
     def runtime(self):
@@ -197,9 +194,7 @@ class MCPToolRuntime(MCPPanelRuntime):
         if not token:
             return None
         try:
-            if len(token) > 2048:
-                raise ValueError()
-            payload = json.loads(base64.urlsafe_b64decode(token + "=" * (-len(token) % 4)))
+            payload = decode_cursor(token)
             if payload[:3] != [owner, self.profile, purpose]:
                 raise ValueError()
             timestamp, identifier = payload[3:]
@@ -213,97 +208,50 @@ class MCPToolRuntime(MCPPanelRuntime):
             raise ValueError("Invalid cursor for this query") from None
 
     def _next(self, row, owner, purpose):
-        return (
-            base64.urlsafe_b64encode(
-                json.dumps(
-                    [owner, self.profile, purpose, row.created_at.isoformat(), row.id]
-                ).encode()
-            )
-            .decode()
-            .rstrip("=")
-        )
+        return encode_cursor([owner, self.profile, purpose, row.created_at.isoformat(), row.id])
 
     async def _list_tools(self, ctx, params):
-        owner = _request_user().api_key_id
-        supports_apps = client_supports_apps(ctx)
-        static = list(self.tools.values()) + ([_panel_call_tool()] if supports_apps else [])
-        offset, before = 0, None
+        # The catalog is static per profile but already near one page on `raw`,
+        # so it is paged by offset; the cursor is bound to the owner and profile
+        # it was issued for.
+        owner = request_user().api_key_id
+        catalog = list(self.tools.values())
+        offset = 0
         token = params.cursor if params else None
-        try:
-            if token:
-                if len(token) > 2048:
+        if token:
+            try:
+                binding, offset = decode_cursor(token)
+                if binding != [owner, self.profile]:
                     raise ValueError()
-                binding, offset, position = json.loads(
-                    base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
-                )
-                if binding != [owner, self.profile, supports_apps]:
+                if type(offset) is not int or not 0 <= offset <= len(catalog):
                     raise ValueError()
-                if type(offset) is not int or not 0 <= offset <= len(static):
-                    raise ValueError()
-                if position:
-                    before = self._cursor(position, owner, "tools")
-            tools = static[offset : offset + 50]
-            offset += len(tools)
-            remaining = 50 - len(tools)
-            page = await self.artifact_store.list_mcp_apps(
-                owner=owner, limit=remaining or 1, before=before
-            )
-            if remaining:
-                tools += [_panel_open_tool(a, supports_apps=supports_apps) for a in page.items]
-                if page.items:
-                    position = self._next(page.items[-1], owner, "tools")
-                else:
-                    position = None
-                more = page.has_more
-            else:
-                position = self._next_cursor_position(before, owner)
-                more = offset < len(static) or bool(page.items)
-            next_cursor = (
-                base64.urlsafe_b64encode(
-                    json.dumps([[owner, self.profile, supports_apps], offset, position]).encode()
-                )
-                .decode()
-                .rstrip("=")
-                if more
-                else None
-            )
-            return ListToolsResult(
-                tools=tools, next_cursor=next_cursor, cache_scope="private", ttl_ms=0
-            )
-        except (ValueError, TypeError) as error:
-            raise MCPError(INVALID_PARAMS, "Invalid tool-list cursor") from error
-
-    def _next_cursor_position(self, before, owner):
-        if before is None:
-            return None
-        timestamp, identifier = before
-        return (
-            base64.urlsafe_b64encode(
-                json.dumps(
-                    [owner, self.profile, "tools", timestamp.isoformat(), identifier]
-                ).encode()
-            )
-            .decode()
-            .rstrip("=")
+            except (ValueError, TypeError) as error:
+                raise MCPError(INVALID_PARAMS, "Invalid tool-list cursor") from error
+        tools = catalog[offset : offset + PAGE_SIZE]
+        offset += len(tools)
+        next_cursor = (
+            encode_cursor([[owner, self.profile], offset]) if offset < len(catalog) else None
+        )
+        return ListToolsResult(
+            tools=tools, next_cursor=next_cursor, cache_scope="private", ttl_ms=0
         )
 
     async def _call_tool(self, ctx, params):
-        user = _request_user()
+        user = request_user()
         name, arguments = params.name, params.arguments or {}
-        if name.startswith(PANEL_TOOL_PREFIX) or name == PANEL_CALL_TOOL:
-            return await super()._call_tool(ctx, params)
         tool = self.tools.get(name)
         if tool is None:
-            return _tool_error("Unknown tool for this MCP profile")
+            return tool_error("Unknown tool for this MCP profile")
         if list(Draft202012Validator(tool.input_schema).iter_errors(arguments)):
-            return _tool_error("Arguments do not match the published tool schema; no operation ran")
+            return tool_error("Arguments do not match the published tool schema; no operation ran")
         try:
             if len(json.dumps(arguments)) > 1_000_000:
                 raise ValueError("Request is too large")
             owner = user.api_key_id
             if name == "artifact.get":
-                descriptor = await self._artifact(owner, arguments["artifactId"])
-                return await self._result(descriptor, [descriptor])
+                record = await self.artifact_store.get(arguments["artifactId"], owner=owner)
+                descriptor = await self._artifact(owner, record)
+                return await self._result(descriptor, [descriptor], records={record.id: record})
             if name == "artifact.list":
                 purpose = json.dumps(
                     ["artifacts", arguments.get("taskId"), arguments.get("contextId")]
@@ -317,7 +265,7 @@ class MCPToolRuntime(MCPPanelRuntime):
                 descriptors = []
                 for row in page.items:
                     try:
-                        descriptors.append(await self._artifact(owner, row.id))
+                        descriptors.append(await self._artifact(owner, row))
                     except ValueError:
                         descriptors.append(
                             {"artifactId": row.id, "name": row.name, "expired": True}
@@ -350,22 +298,21 @@ class MCPToolRuntime(MCPPanelRuntime):
                         family=self.family,
                     ),
                 )
+                snapshots, _ = await self._snapshots(owner, tasks)
                 return await self._result(
                     {
-                        "tasks": [await self._snapshot(owner, task) for task in tasks],
+                        "tasks": snapshots,
                         "total": total,
                         "nextCursor": cursor or None,
                     }
                 )
-            if name.startswith("task."):
-                await asyncio.to_thread(
-                    runtime.store.require_family, owner, arguments["taskId"], self.family
-                )
             if name == "task.cancel":
-                task = await asyncio.shield(runtime.cancel(owner, arguments["taskId"]))
+                task = await asyncio.shield(
+                    runtime.cancel(owner, arguments["taskId"], family=self.family)
+                )
             elif name == "task.get":
                 task = await runtime.wait(
-                    owner, arguments["taskId"], arguments.get("waitSeconds", 0)
+                    owner, arguments["taskId"], arguments.get("waitSeconds", 0), family=self.family
                 )
             else:
                 if name == "task.resume":
@@ -376,7 +323,7 @@ class MCPToolRuntime(MCPPanelRuntime):
                         "parts": [{"data": reply} for reply in arguments["replies"]],
                     }
                     operation = await asyncio.to_thread(
-                        runtime.store.operation, owner, arguments["taskId"]
+                        runtime.store.operation, owner, arguments["taskId"], family=self.family
                     )
                 else:
                     message = {
@@ -409,18 +356,22 @@ class MCPToolRuntime(MCPPanelRuntime):
                     request["operation"] = operation.json()
                 admission = await asyncio.shield(runtime.admit(owner, request))
                 task = await runtime.wait(
-                    owner, admission.task.id, arguments.get("waitSeconds", 25)
+                    owner, admission.task.id, arguments.get("waitSeconds", 25), family=self.family
                 )
-            snapshot = await self._snapshot(owner, task)
+            snapshots, records = await self._snapshots(owner, [task])
+            snapshot = snapshots[0]
             return await self._result(
-                snapshot, snapshot["artifacts"], error=snapshot["status"] in {"failed", "rejected"}
+                snapshot,
+                snapshot["artifacts"],
+                records=records,
+                error=snapshot["status"] in {"failed", "rejected"},
             )
         except (ValueError, AgentError, PermissionError) as error:
-            return _tool_error(str(error))
+            return tool_error(str(error))
 
-    async def _artifact(self, owner, identifier):
-        descriptor = await self.downloads.descriptor(owner, identifier)
-        descriptor["resourceUri"] = "wotbot://artifacts/" + identifier
+    async def _artifact(self, owner, record):
+        descriptor = await self.downloads.descriptor(owner, record)
+        descriptor["resourceUri"] = "wotbot://artifacts/" + record.id
         if descriptor.get("descriptor"):
             descriptor["descriptor"] = {
                 **descriptor["descriptor"],
@@ -428,11 +379,18 @@ class MCPToolRuntime(MCPPanelRuntime):
             }
         return descriptor
 
-    async def _snapshot(self, owner, task):
+    async def _snapshots(self, owner, tasks):
+        records = await self.artifact_store.get_many(
+            list({artifact.artifact_id for task in tasks for artifact in task.artifacts}),
+            owner=owner,
+        )
+        return [await self._snapshot(owner, task, records) for task in tasks], records
+
+    async def _snapshot(self, owner, task, records):
         artifacts = []
         for artifact in task.artifacts:
             try:
-                artifacts.append(await self._artifact(owner, artifact.artifact_id))
+                artifacts.append(await self._artifact(owner, records.get(artifact.artifact_id)))
             except ValueError as error:
                 artifacts.append({**artifact.json(), "error": str(error)})
         message = task.status.message.json() if task.status.message else None
@@ -458,7 +416,7 @@ class MCPToolRuntime(MCPPanelRuntime):
             else None,
         }
 
-    async def _result(self, data, artifacts=(), *, error=False):
+    async def _result(self, data, artifacts=(), *, records=None, error=False):
         content = [TextContent(type="text", text=json.dumps(data, ensure_ascii=False, default=str))]
         for artifact in artifacts:
             uri = artifact.get("resourceUri") or artifact.get("downloadUrl")
@@ -479,27 +437,12 @@ class MCPToolRuntime(MCPPanelRuntime):
             if not isinstance(size, int) or size > preview_budget:
                 continue
             try:
-                from wotbot.agent_api.outputs import _executor_url, executor_headers
-
-                record = await self.artifact_store.get(
-                    artifact["artifactId"], owner=_request_user().api_key_id
-                )
+                record = (records or {}).get(artifact["artifactId"])
                 if not record or not record.executor_artifact_id:
                     continue
-                image_bytes = bytearray()
-                async with httpx.AsyncClient(
-                    timeout=self.settings.code_executor_timeout_seconds
-                ) as client:
-                    async with client.stream(
-                        "GET",
-                        _executor_url(self.settings, record.executor_artifact_id, "/content"),
-                        headers=executor_headers(self.settings),
-                    ) as response:
-                        response.raise_for_status()
-                        async for chunk in response.aiter_bytes():
-                            image_bytes.extend(chunk)
-                            if len(image_bytes) > preview_budget:
-                                raise ValueError("Image exceeds inline preview limit")
+                image_bytes = await CodeExecutorClient(self.settings).read_artifact(
+                    record.executor_artifact_id, max_bytes=preview_budget
+                )
                 content.append(
                     ImageContent(
                         type="image",
@@ -523,9 +466,9 @@ class MCPToolRuntime(MCPPanelRuntime):
     async def _read_resource(self, ctx, params):
         prefix = "wotbot://artifacts/"
         if str(params.uri).startswith(prefix):
-            descriptor = await self._artifact(
-                _request_user().api_key_id, str(params.uri)[len(prefix) :]
-            )
+            owner = request_user().api_key_id
+            record = await self.artifact_store.get(str(params.uri)[len(prefix) :], owner=owner)
+            descriptor = await self._artifact(owner, record)
             return ReadResourceResult(
                 contents=[
                     TextResourceContents(
@@ -535,4 +478,4 @@ class MCPToolRuntime(MCPPanelRuntime):
                 cache_scope="private",
                 ttl_ms=0,
             )
-        return await super()._read_resource(ctx, params)
+        raise MCPError(INVALID_PARAMS, "Resource not found")

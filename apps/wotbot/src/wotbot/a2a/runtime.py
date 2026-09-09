@@ -1,6 +1,5 @@
 """A2A input validation and SDK facade over shared application execution."""
 
-import asyncio
 import json
 from contextlib import aclosing
 from dataclasses import replace
@@ -64,15 +63,15 @@ class A2ARuntime:
 
     async def cancel(self, owner, task_id):
         try:
-            await asyncio.to_thread(self.service.store.require_family, owner, task_id, "assistant")
-            return to_wire(await self.service.cancel(owner, task_id))
+            return to_wire(await self.service.cancel(owner, task_id, family="assistant"))
         except AgentError as error:
             raise wire_error(error) from error
 
     async def subscribe(self, owner, task_id, **kwargs):
         try:
-            await asyncio.to_thread(self.service.store.require_family, owner, task_id, "assistant")
-            async with aclosing(self.service.subscribe(owner, task_id, **kwargs)) as events:
+            async with aclosing(
+                self.service.subscribe(owner, task_id, family="assistant", **kwargs)
+            ) as events:
                 async for event in events:
                     yield to_wire(event)
         except AgentError as error:

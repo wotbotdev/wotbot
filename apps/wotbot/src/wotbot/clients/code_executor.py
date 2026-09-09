@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -89,6 +91,43 @@ class CodeExecutorClient:
     def _headers(self) -> dict[str, str]:
         token = self._settings.internal_api_key
         return {"Authorization": f"Bearer {token}"} if token else {}
+
+    def _artifact_url(self, identifier: str, suffix: str) -> str:
+        return f"{self._base_url}/artifacts/{quote(identifier, safe='')}/{suffix}"
+
+    async def artifact_metadata(self, identifier: str) -> dict:
+        async with httpx.AsyncClient(
+            timeout=self._settings.code_executor_timeout_seconds
+        ) as client:
+            response = await client.get(
+                self._artifact_url(identifier, "metadata"), headers=self._headers()
+            )
+            response.raise_for_status()
+            descriptor = response.json()
+        if not isinstance(descriptor, dict) or not descriptor.get("expires_at"):
+            raise ValueError("Executor returned an unusable artifact descriptor")
+        return {**descriptor, "id": identifier}
+
+    @asynccontextmanager
+    async def stream_artifact(self, identifier: str):
+        """Keep the upstream response open until its consumer finishes or disconnects."""
+        async with httpx.AsyncClient(
+            timeout=self._settings.code_executor_timeout_seconds
+        ) as client:
+            async with client.stream(
+                "GET", self._artifact_url(identifier, "content"), headers=self._headers()
+            ) as response:
+                yield response
+
+    async def read_artifact(self, identifier: str, *, max_bytes: int) -> bytes:
+        async with self.stream_artifact(identifier) as response:
+            response.raise_for_status()
+            content = bytearray()
+            async for chunk in response.aiter_bytes():
+                if len(content) + len(chunk) > max_bytes:
+                    raise ValueError("Artifact exceeds content size limit")
+                content.extend(chunk)
+            return bytes(content)
 
     async def store_web_artifact(self, *, html: str) -> str:
         """Persist a generated HTML interface and return its artifact filename."""

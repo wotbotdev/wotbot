@@ -26,6 +26,5 @@ def test_independent_surface_flags(a2a, mcp):
     assert ("/a2a/v1/message:send" in paths) == a2a
     for profile in ("assistant", "intents", "raw"):
         assert ("/mcp/" + profile in paths) == mcp
-    assert ("/mcp/apps" in paths) == (a2a or mcp)
     assert ("/agent/artifacts/{artifact_id}" in paths) == (a2a or mcp)
     assert ("/a2a/artifacts/{artifact_id}" in paths) == (a2a or mcp)

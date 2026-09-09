@@ -6,17 +6,18 @@ from uuid import uuid4
 
 from sqlalchemy import delete, select
 
-from wotbot.agent_api.downloads import ArtifactDownloadLinks
 from wotbot.agent_api.models import AgentSubscriptionRecord
-from wotbot.clients.wot_runtime import WotRuntimeClient
-from wotbot.core.database import get_session_factory
-from wotbot.core.time import utc_now
-from wotbot.mcp_apps.service import (
+from wotbot.auth.providers import get_agent_principal
+from wotbot.clients.runtime_stream import (
     next_subscription_event,
     requested_cursor,
     runtime_stream_tail,
     subscription_id_from_result,
 )
+from wotbot.clients.wot_runtime import WotRuntimeClient
+from wotbot.core.agent_runs import RunRegistry
+from wotbot.core.database import get_session_factory
+from wotbot.core.time import utc_now
 
 
 class RawSubscriptions:
@@ -26,8 +27,9 @@ class RawSubscriptions:
         self.settings = settings
         self.client = client or WotRuntimeClient(settings)
         self.sessions = session_factory or get_session_factory()
-        self.principals = ArtifactDownloadLinks(settings, session_factory=self.sessions)
-        self.lock = asyncio.Lock()
+        # One lock per raw context. A runtime call for one Thing may take as
+        # long as its subscribe timeout; nothing outside that context waits.
+        self.locks = RunRegistry()
 
     def _owned(self, owner, context_id, identifier, *, renew=False):
         with self.sessions() as session, session.begin():
@@ -64,6 +66,14 @@ class RawSubscriptions:
             row.expires_at = utc_now() + timedelta(hours=1)
             return row.id
 
+    def _lapsed(self, identifier, *, authorized):
+        """Re-read under the caller's lock: a poll may have renewed the lease."""
+        with self.sessions() as session:
+            row = session.get(AgentSubscriptionRecord, identifier)
+            if row is None or (authorized and row.expires_at > utc_now()):
+                return None
+            return row.runtime_id
+
     def _forget(self, identifier):
         with self.sessions() as session, session.begin():
             session.execute(
@@ -73,7 +83,7 @@ class RawSubscriptions:
     async def execute(self, name, arguments, config):
         identity = config["configurable"]
         owner, context_id = identity["owner"], identity["thread_id"]
-        async with self.lock:
+        async with self.locks.thread_lock(context_id):
             if name == "wot_remove_subscription":
                 identifier = arguments["subscription_id"]
                 runtime_id = await asyncio.to_thread(self._owned, owner, context_id, identifier)
@@ -98,7 +108,7 @@ class RawSubscriptions:
             return {**_replace_id(result, runtime_id, identifier), "cursor": cursor}
 
     async def poll(self, owner, context_id, identifier, *, cursor=None, timeout_ms=25000):
-        async with self.lock:
+        async with self.locks.thread_lock(context_id):
             runtime_id = await asyncio.to_thread(
                 self._owned, owner, context_id, identifier, renew=True
             )
@@ -120,25 +130,36 @@ class RawSubscriptions:
         )
         # A cancellation or revocation during a long poll must not release more data.
         await asyncio.to_thread(self._owned, owner, context_id, identifier)
-        if await asyncio.to_thread(self.principals._principal, owner) is None:
+        if (
+            await asyncio.to_thread(get_agent_principal, owner, session_factory=self.sessions)
+            is None
+        ):
             raise ValueError("The invoking API key is no longer authorized")
         return {**_replace_id(result, runtime_id, identifier), "nextCursor": cursor}
 
     async def sweep(self):
-        async with self.lock:
-            with self.sessions() as session:
-                rows = list(session.scalars(select(AgentSubscriptionRecord)))
-            for row in rows:
-                principal = await asyncio.to_thread(self.principals._principal, row.owner)
-                if row.expires_at <= utc_now() or principal is None:
-                    try:
-                        status = await self.client.subscription_status(row.runtime_id)
-                        if status.get("exists"):
-                            await self.client.remove_subscription(subscription_id=row.runtime_id)
-                    except Exception:
-                        # Retain the binding for the next cleanup attempt.
-                        continue
-                    await asyncio.to_thread(self._forget, row.id)
+        with self.sessions() as session:
+            rows = list(session.scalars(select(AgentSubscriptionRecord)))
+        for row in rows:
+            authorized = (
+                await asyncio.to_thread(
+                    get_agent_principal, row.owner, session_factory=self.sessions
+                )
+            ) is not None
+            if authorized and row.expires_at > utc_now():
+                continue
+            async with self.locks.thread_lock(row.context_id):
+                runtime_id = await asyncio.to_thread(self._lapsed, row.id, authorized=authorized)
+                if runtime_id is None:
+                    continue
+                try:
+                    status = await self.client.subscription_status(runtime_id)
+                    if status.get("exists"):
+                        await self.client.remove_subscription(subscription_id=runtime_id)
+                except Exception:
+                    # Retain the binding for the next cleanup attempt.
+                    continue
+                await asyncio.to_thread(self._forget, row.id)
 
 
 def _replace_id(value, runtime_id, public_id):

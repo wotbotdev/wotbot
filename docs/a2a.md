@@ -1,4 +1,4 @@
-# A2A and MCP Apps
+# Inbound A2A
 
 WoTBot accepts inbound agent requests using the official Python A2A SDK and the
 [A2A 1.0 HTTP+JSON binding](https://a2a-protocol.org/v1.0.0/specification/#11-httpjsonrest-protocol-binding).
@@ -22,8 +22,8 @@ A2A_DOWNLOAD_URL_TTL_SECONDS=3600
 A2A_MAX_ARTIFACT_BYTES=26214400
 ```
 
-The public backend origin must be reachable by agents and MCP Apps hosts. The
-UI origin supplies panel links. Put the normal HTTPS reverse proxy in front of
+The public backend origin must be reachable by calling agents. The UI origin
+supplies panel links. Put the normal HTTPS reverse proxy in front of
 the API, preserving streaming responses. Startup applies the additive migration
 `0008_add_a2a` and `0009_a2a_identity`; they preserve existing conversations, panel versions, interactive
 jobs, and virtual Thing ownership. Disabling the flag removes the new routes
@@ -75,7 +75,6 @@ actions already completed cannot be undone.
 | `POST /a2a/v1/tasks/{id}:subscribe` | Snapshot and subsequent updates for an active task |
 | `POST /a2a/v1/tasks/{id}:cancel` | Cancel execution and finalize the checkpoint |
 | `GET /a2a/artifacts/{id}` | Download with an API key or temporary download token; also supports `HEAD` |
-| `/mcp/apps` | MCP Streamable HTTP server for generated panels |
 
 The card advertises six skills with examples and input/output types: `chat`,
 `control`, `analysis`, `jobs`, `virtual_things`, and `discovery`. Send the desired
@@ -282,37 +281,15 @@ WoTBot's panel descriptor is an application JSON format carried by A2A:
   "version": 1,
   "panelId": "saved-panel-id",
   "panelVersionId": "immutable-initial-version-id",
-  "panelUrl": "https://wotbot.example.com/panels?panelId=saved-panel-id",
-  "mcpServerUrl": "https://api.example.com/mcp/apps",
-  "toolName": "panel.open.artifact-id",
-  "resourceUri": "ui://wotbot/generated/artifact-id"
+  "panelUrl": "https://wotbot.example.com/panels?panelId=saved-panel-id"
 }
 ```
 
 An A2A client can display `panelUrl`. It opens the existing Panels drawer under
 the deployment's normal UI access controls. Saved panels belong to the shared
 Panels collection; their source A2A conversations remain hidden. The link
-follows the current saved panel, including later edits. The MCP resource keeps
-the generated initial version and its original operation allowlist: its markup
-and allowlist are read from that pinned panel version on every read, and the
-document is wrapped at that point, so a saved panel serves the current bridge
-and content security policy rather than the ones in force when it was made.
-
-## Connect an MCP Apps host
-
-Configure an MCP Streamable HTTP connection to the descriptor's `mcpServerUrl`
-with `Authorization: Bearer <same-api-key>`. The host must support the
-[MCP Apps extension](https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx)
-to render the panel. Refresh `tools/list` after generation and call the named
-`panel.open.<artifactId>` tool with `{}`. A non-Apps MCP client receives the
-descriptor and can show the normal panel link.
-
-Tools/resources are filtered by key. Standard `_meta.ui.resourceUri` metadata
-points to immutable `ui://` HTML resources with MIME type
-`text/html;profile=mcp-app`. The open result supplies a one-hour launch grant in
-tool-result metadata. The app-only `panels.call` tool accepts that grant and
-performs panel interactions without creating A2A tasks. The full API key stays
-in the host connection, outside generated code.
+follows the current saved panel, including later edits, while `panelVersionId`
+keeps naming the immutable version generated for this task.
 
 Subscriptions carry their own stream position: a subscribe returns the cursor
 captured before it, `things.next_subscription_event` accepts `cursor` and returns
@@ -358,10 +335,9 @@ existing external-provider smoke tests remain opt-in.
 
 Run UI `npm test` and `npm run typecheck` from `apps/ui`. The reproducible
 [browser acceptance fixture](../apps/wotbot/tests/browser/README.md) exercises
-the official MCP Apps AppBridge and the existing WoTBot bridge using the same
-generated panel. Before enabling a deployment, use its real origins and a
-dedicated key to exercise discovery, a read-only task, panel opening, and the
-intended device operations in the chosen external host.
+the WoTBot panel bridge using a generated panel. Before enabling a deployment,
+use its real origins and a dedicated key to exercise discovery, a read-only
+task, and the intended device operations.
 
 This release accepts text and structured JSON. Binary uploads, outbound A2A
 calls, push notifications, A2UI, and multiple API execution processes are

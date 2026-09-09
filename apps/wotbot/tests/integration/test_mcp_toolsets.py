@@ -1,10 +1,11 @@
 """MCP profiles exercise the real shared database, graph lifecycle and SDK."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 import pytest
@@ -15,19 +16,22 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import interrupt
 from mcp.types import CallToolRequestParams
 
-from .test_a2a import graph_for, request, running, finish, fake_executor
-from .test_a2a import environment as environment, anyio_backend as anyio_backend
+from wotbot.agent.tools.contracts import tool
 from wotbot.agent_api.catalog import PUBLIC_NAMES, argument_schema, validate_arguments
+from wotbot.agent_api.errors import TaskNotFoundError
+from wotbot.agent_api.models import AgentSubscriptionRecord
 from wotbot.agent_api.raw import build_raw_graph
 from wotbot.agent_api.subscriptions import RawSubscriptions
-from wotbot.agent.tools.contracts import tool
 from wotbot.auth.models import User
 from wotbot.core.database import get_session_factory
 from wotbot.core.settings import Settings
 from wotbot.core.time import utc_now
 from wotbot.mcp.server import MCPToolRuntime, profile_tools
-from wotbot.a2a.models import AgentSubscriptionRecord
 from wotbot.threads.models import Thread
+
+from .test_a2a import anyio_backend as anyio_backend
+from .test_a2a import environment as environment
+from .test_a2a import fake_executor, finish, graph_for, request, running
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -39,7 +43,7 @@ def principal(owner):
 
 
 def install_profiles(runtime, monkeypatch, owner):
-    monkeypatch.setattr("wotbot.mcp.server._request_user", lambda: principal(owner))
+    monkeypatch.setattr("wotbot.mcp.server.request_user", lambda: principal(owner))
     return {
         profile: MCPToolRuntime(
             profile=profile, get_runtime=lambda: runtime.service, settings=runtime.settings
@@ -95,6 +99,13 @@ async def test_shared_contexts_raw_isolation_and_catalog(environment, monkeypatc
             assert (
                 thread.kind == "mcp_raw" and not thread.visible and thread.owner_api_key_id == owner
             )
+        # Raw and assistant are separate surfaces, so a requestId spent on one
+        # is still available on the other.
+        reused = await call(
+            profiles["assistant"], "ask_wotbot", requestId="raw-clock", message="Separate"
+        )
+        assert not reused.is_error, reused
+        assert reused.structured_content["contextId"] != raw_task["contextId"]
         for profile, name, arguments in [
             ("assistant", "get_current_time", {"arguments": {}}),
             ("raw", "ask_wotbot", {"message": "Hello"}),
@@ -106,7 +117,7 @@ async def test_shared_contexts_raw_isolation_and_catalog(environment, monkeypatc
             ).is_error
         assert (await call(profiles["assistant"], "task.get", taskId=raw_task["taskId"])).is_error
         assert (await call(profiles["raw"], "task.get", taskId=first.task.id)).is_error
-        monkeypatch.setattr("wotbot.mcp.server._request_user", lambda: principal(other))
+        monkeypatch.setattr("wotbot.mcp.server.request_user", lambda: principal(other))
         assert (await call(profiles["raw"], "task.get", taskId=raw_task["taskId"])).is_error
         assert (
             await call(
@@ -117,6 +128,53 @@ async def test_shared_contexts_raw_isolation_and_catalog(environment, monkeypatc
                 contextId=raw_task["contextId"],
             )
         ).is_error
+
+
+@pytest.mark.parametrize("raw_first", [True, False])
+async def test_prefixed_request_ids_are_independent_and_retries_stay_deduplicated(
+    environment, monkeypatch, raw_first
+):
+    owner = environment[0]
+    executions = []
+
+    async def node(state):
+        executions.append("assistant")
+        return {"messages": [AIMessage(content="Done")]}
+
+    @tool
+    async def clock():
+        """Return a fixed time without contacting a device."""
+        executions.append("raw")
+        return {"time": "now"}
+
+    async with running(graph_for(node)) as runtime:
+        runtime.service.raw_graph = build_raw_graph(
+            InMemorySaver(), tools={"get_current_time": clock}
+        )
+        profiles = install_profiles(runtime, monkeypatch, owner)
+        requests = {
+            "raw": ("get_current_time", {"requestId": "example", "arguments": {}}),
+            "assistant": ("ask_wotbot", {"requestId": "raw:example", "message": "Hello"}),
+        }
+        order = ["raw", "assistant"] if raw_first else ["assistant", "raw"]
+        tasks = {}
+        for family in order:
+            name, arguments = requests[family]
+            result = await call(profiles[family], name, **arguments)
+            assert not result.is_error, result
+            tasks[family] = result.structured_content
+        assert tasks["raw"]["taskId"] != tasks["assistant"]["taskId"]
+        assert tasks["raw"]["contextId"] != tasks["assistant"]["contextId"]
+        # Existing assistant identities must keep their public IDs.
+        assert tasks["assistant"]["taskId"] == str(
+            uuid5(NAMESPACE_URL, f"wotbot:a2a:{owner}:raw:example")
+        )
+        for family in order:
+            name, arguments = requests[family]
+            retry = await call(profiles[family], name, **arguments)
+            assert not retry.is_error, retry
+            assert retry.structured_content["taskId"] == tasks[family]["taskId"]
+        assert executions == order
 
 
 async def test_raw_dedup_disconnect_cancel_and_resume(environment, monkeypatch):
@@ -156,6 +214,13 @@ async def test_raw_dedup_disconnect_cancel_and_resume(environment, monkeypatch):
         }
         first = (await call(raw, "wot_write_property", **arguments)).structured_content
         await entered.wait()
+        # Shared runtime entry points enforce the family before waiting or stopping work.
+        for seconds in (0, 5):
+            with pytest.raises(TaskNotFoundError):
+                await runtime.service.wait(owner, first["taskId"], seconds, family="assistant")
+        with pytest.raises(TaskNotFoundError):
+            await runtime.service.cancel(owner, first["taskId"], family="assistant")
+        assert not runtime.runners[first["taskId"]].done()
         retry = (await call(raw, "wot_write_property", **arguments)).structured_content
         assert first["taskId"] == retry["taskId"]
         changed = {**arguments, "arguments": {**arguments["arguments"], "value": 50}}
@@ -196,6 +261,28 @@ async def test_raw_dedup_disconnect_cancel_and_resume(environment, monkeypatch):
         ).structured_content
         assert paused["status"] == "input_required", paused
         assert effects == [42]
+        profiles = install_profiles(runtime, monkeypatch, owner)
+        for profile in ("assistant", "intents"):
+            for name, arguments in (
+                ("task.cancel", {}),
+                (
+                    "task.resume",
+                    {
+                        "requestId": "wrong-family-" + profile,
+                        "replies": [
+                            {
+                                "requestId": paused["pending"][0]["requestId"],
+                                "response": {"approved": True},
+                            }
+                        ],
+                    },
+                ),
+            ):
+                rejected = await call(profiles[profile], name, taskId=paused["taskId"], **arguments)
+                assert rejected.is_error and rejected.content[0].text == "Task not found"
+        assert (await call(raw, "task.get", taskId=paused["taskId"])).structured_content[
+            "status"
+        ] == "input_required"
         assert (
             await call(
                 raw,
@@ -218,6 +305,61 @@ async def test_raw_dedup_disconnect_cancel_and_resume(environment, monkeypatch):
         )
         assert resumed.structured_content["status"] == "completed", resumed
         assert effects == [42, 42]
+
+
+async def test_raw_credential_retry_is_neither_prompted_nor_dispatched_again(
+    environment, monkeypatch
+):
+    owner = environment[0]
+    dispatched = []
+
+    async def forbidden(state):
+        raise AssertionError("Raw calls must not invoke the assistant")
+
+    @tool
+    async def rejected(thing_id: str, property_name: str, value: int):
+        """A device whose credentials are rejected again after its one retry."""
+        dispatched.append(value)
+        challenge = {"status": "credential_required", "thingId": thing_id}
+        answer = interrupt({"kind": "credential", **challenge})
+        if answer.get("status") != "credential_saved":
+            return {**challenge, "status": "credential_cancelled"}
+        # What the registry tools return once the allowed retry was rejected.
+        return {**challenge, "retry_exhausted": True}
+
+    async with running(graph_for(forbidden)) as runtime:
+        runtime.service.raw_graph = build_raw_graph(
+            InMemorySaver(), tools={"wot_write_property": rejected}
+        )
+        raw = install_profiles(runtime, monkeypatch, owner)["raw"]
+        paused = (
+            await call(
+                raw,
+                "wot_write_property",
+                requestId="credentials",
+                arguments={"thing_id": "lamp", "property_name": "level", "value": 42},
+            )
+        ).structured_content
+        assert paused["status"] == "auth_required", paused
+        resumed = (
+            await call(
+                raw,
+                "task.resume",
+                taskId=paused["taskId"],
+                requestId="credentials-saved",
+                replies=[
+                    {
+                        "requestId": paused["pending"][0]["requestId"],
+                        "response": {"status": "credential_saved"},
+                    }
+                ],
+            )
+        ).structured_content
+        # The tool ran its own credential round. Asking again would restart the
+        # node and dispatch the device call a third time.
+        assert resumed["status"] == "failed", resumed
+        assert not resumed["pending"]
+        assert dispatched == [42, 42]
 
 
 async def test_raw_subscription_ownership_binary_expiry_and_revocation(environment, monkeypatch):
@@ -301,7 +443,7 @@ async def test_public_schemas_reject_injected_fields(environment):
 @pytest.fixture(autouse=True)
 async def close_stream_clients():
     yield
-    from wotbot.mcp_apps.service import close_runtime_stream_clients
+    from wotbot.clients.runtime_stream import close_runtime_stream_clients
 
     await close_runtime_stream_clients()
 
@@ -326,10 +468,11 @@ async def serve(app):
 
 
 @pytest.mark.parametrize("profile", ["assistant", "intents", "raw"])
-async def test_official_mcp_client_profiles_panels_and_auth(environment, profile):
+async def test_official_mcp_client_profiles_and_auth(environment, profile):
     import httpx2
     from mcp.client import Client
     from mcp.client.streamable_http import streamable_http_client
+
     from wotbot.a2a.server import install_downloads
     from wotbot.agent_api.outputs import ArtifactCollector
 
@@ -341,22 +484,6 @@ async def test_official_mcp_client_profiles_panels_and_auth(environment, profile
     async with running(graph_for(node)) as runtime:
         runtime.service.raw_graph = build_raw_graph(InMemorySaver())
         runtime.owner = owner
-        # Save a real panel through the same output processor used by raw/assistant runs.
-        admitted = await runtime.admit(owner, request())
-        await finish(runtime, admitted.task)
-        collector = ArtifactCollector(
-            settings=Settings(),
-            owner=owner,
-            task_id=admitted.task.id,
-            thread_id=admitted.task.context_id,
-        )
-        output = await collector.record_tool_result(
-            "create_web_interface",
-            {"title": "SDK panel", "html": "<p>SDK panel</p>"},
-            {"artifacts": [{"kind": "web", "capabilities": []}]},
-            "panel-call",
-        )
-        panel = output[0].parts[0].data
         mcp = MCPToolRuntime(
             profile=profile, get_runtime=lambda: runtime.service, settings=Settings()
         )
@@ -371,10 +498,11 @@ async def test_official_mcp_client_profiles_panels_and_auth(environment, profile
                 async with Client(
                     streamable_http_client(base + "/mcp/" + profile, http_client=http)
                 ) as client:
+                    assert client.server_capabilities.resources is not None
+                    assert (await client.list_resources()).resources == []
                     listing = await client.list_tools()
                     names = {t.name for t in listing.tools}
                     assert set(profile_tools(profile)) <= names
-                    assert panel["toolName"] in names
                     if profile == "raw":
                         result = await client.call_tool(
                             "get_current_time", {"requestId": "sdk-clock", "arguments": {}}
@@ -390,28 +518,31 @@ async def test_official_mcp_client_profiles_panels_and_auth(environment, profile
                     assert not result.is_error, result
                     task = result.structured_content
                     assert task["status"] == "completed"
-                    opened = await client.call_tool(panel["toolName"], {})
-                    assert not opened.is_error, opened
-                    assert opened.structured_content["mcpServerUrl"].endswith("/mcp/" + profile)
-                    document = await client.read_resource(panel["resourceUri"])
-                    assert "SDK panel" in document.contents[0].text
-                    assert document.contents[0].text.index("window.wot =") < document.contents[
-                        0
-                    ].text.index("<p>SDK panel</p>")
+                    collector = ArtifactCollector(
+                        settings=runtime.settings,
+                        owner=owner,
+                        task_id=task["taskId"],
+                        thread_id=task["contextId"],
+                    )
+                    artifacts = await collector.record_tool_result(
+                        "get_current_time", {}, {"time": "now"}, "sdk-artifact"
+                    )
+                    artifact = await client.call_tool(
+                        "artifact.get", {"artifactId": artifacts[0].artifact_id}
+                    )
+                    assert not artifact.is_error, artifact
+                    link = next(part for part in artifact.content if part.type == "resource_link")
+                    resource = await client.read_resource(str(link.uri))
+                    descriptor = json.loads(resource.contents[0].text)
+                    assert descriptor["artifactId"] == artifacts[0].artifact_id
+                    assert descriptor["artifact"]["parts"][0]["data"]["result"] == {"time": "now"}
             async with httpx2.AsyncClient(
                 headers={"Authorization": "Bearer " + other_token, "Host": "localhost:8000"}
             ) as http:
                 async with Client(
                     streamable_http_client(base + "/mcp/" + profile, http_client=http)
                 ) as client:
-                    assert panel["toolName"] not in {
-                        t.name for t in (await client.list_tools()).tools
-                    }
                     assert (await client.call_tool("task.get", {"taskId": task["taskId"]})).is_error
-                    from mcp.shared.exceptions import MCPError
-
-                    with pytest.raises(MCPError):
-                        await client.call_tool(panel["toolName"], {})
             async with httpx.AsyncClient(base_url=base, headers={"Host": "localhost:8000"}) as http:
                 assert (
                     await http.post(
@@ -467,9 +598,9 @@ async def test_official_mcp_client_profiles_panels_and_auth(environment, profile
 
 
 async def test_mcp_image_file_links_and_expiry(environment, monkeypatch):
-    from wotbot.agent_api.outputs import ArtifactCollector
     from wotbot.a2a.server import install_downloads
-    from wotbot.a2a.models import A2AArtifactRecord
+    from wotbot.agent_api.models import AgentArtifactRecord
+    from wotbot.agent_api.outputs import ArtifactCollector
 
     owner, _, other, *_ = environment
 
@@ -500,8 +631,11 @@ async def test_mcp_image_file_links_and_expiry(environment, monkeypatch):
                 "export",
             )
             raw = install_profiles(runtime, monkeypatch, owner)["raw"]
+            artifact_get = AsyncMock(wraps=raw.artifact_store.get)
+            monkeypatch.setattr(raw.artifact_store, "get", artifact_get)
             image_result = await call(raw, "artifact.get", artifactId=outputs[0].artifact_id)
             assert any(part.type == "image" for part in image_result.content), image_result
+            assert artifact_get.await_count == 1  # The inline preview reuses the loaded record.
             first = image_result.structured_content["downloadUrl"]
             second = (
                 await call(raw, "artifact.get", artifactId=outputs[0].artifact_id)
@@ -516,14 +650,110 @@ async def test_mcp_image_file_links_and_expiry(environment, monkeypatch):
                     await http.get(first.replace("/agent/artifacts/", "/a2a/artifacts/"))
                 ).status_code == 200
                 with get_session_factory()() as session:
-                    session.get(A2AArtifactRecord, outputs[0].artifact_id).expires_at = (
+                    session.get(AgentArtifactRecord, outputs[0].artifact_id).expires_at = (
                         utc_now() - timedelta(seconds=1)
                     )
                     session.commit()
                 assert (await http.get(first)).status_code == 410
             assert (await call(raw, "artifact.get", artifactId=outputs[0].artifact_id)).is_error
-            monkeypatch.setattr("wotbot.mcp.server._request_user", lambda: principal(other))
+            monkeypatch.setattr("wotbot.mcp.server.request_user", lambda: principal(other))
             assert (await call(raw, "artifact.get", artifactId=outputs[1].artifact_id)).is_error
+
+
+async def test_artifact_pages_and_task_snapshots_use_one_metadata_query(environment, monkeypatch):
+    from contextlib import contextmanager
+
+    from sqlalchemy import event
+
+    from wotbot.agent_api.models import AgentArtifactRecord
+    from wotbot.agent_api.types import Artifact
+    from wotbot.core.database import get_sqlalchemy_engine
+
+    owner, _, other, *_ = environment
+    engine = get_sqlalchemy_engine()
+
+    @contextmanager
+    def artifact_queries():
+        queries = []
+
+        def count(connection, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("SELECT") and "a2a_artifacts" in statement:
+                queries.append(statement)
+
+        event.listen(engine, "before_cursor_execute", count)
+        try:
+            yield queries
+        finally:
+            event.remove(engine, "before_cursor_execute", count)
+
+    async def node(state):
+        return {"messages": [AIMessage(content="done")]}
+
+    async with running(graph_for(node)) as runtime:
+        runtime.owner = owner
+        tasks = []
+        for _ in range(2):
+            admitted = await runtime.admit(owner, request())
+            await finish(runtime, admitted.task)
+            tasks.append(runtime.service.store.get(owner, admitted.task.id))
+        identifiers = [str(uuid4()) for _ in range(53)]
+        now = utc_now()
+        with get_session_factory()() as session:
+            for index, identifier in enumerate(identifiers):
+                task = tasks[index % 2]
+                artifact = Artifact(artifact_id=identifier, name=f"Output {index}")
+                task.artifacts.append(artifact)
+                session.add(
+                    AgentArtifactRecord(
+                        id=identifier,
+                        task_id=task.id,
+                        owner=owner,
+                        name=artifact.name,
+                        media_type="application/json",
+                        artifact_metadata={"artifact": artifact.json()},
+                        created_at=now,
+                        expires_at=now + timedelta(days=1) if index else now - timedelta(days=1),
+                    )
+                )
+            foreign, missing = str(uuid4()), str(uuid4())
+            session.add(
+                AgentArtifactRecord(
+                    id=foreign,
+                    task_id=tasks[0].id,
+                    owner=other,
+                    name="Foreign private output",
+                    media_type="application/json",
+                    artifact_metadata={"private": True},
+                    created_at=now,
+                )
+            )
+            session.commit()
+        tasks[0].artifacts.extend([Artifact(artifact_id=foreign), Artifact(artifact_id=missing)])
+        for task in tasks:
+            runtime.service.store.save(owner, task)
+        assistant = install_profiles(runtime, monkeypatch, owner)["assistant"]
+        with artifact_queries() as queries:
+            first = (await call(assistant, "artifact.list")).structured_content
+        assert len(queries) == 1 and len(first["artifacts"]) == 50
+        with artifact_queries() as queries:
+            second = (
+                await call(assistant, "artifact.list", cursor=first["nextCursor"])
+            ).structured_content
+        assert len(queries) == 1 and second["nextCursor"] is None
+        listed = first["artifacts"] + second["artifacts"]
+        # Equal timestamps must still page without skipping or repeating artifacts.
+        assert [item["artifactId"] for item in listed] == sorted(identifiers, reverse=True)
+        assert next(item for item in listed if item["artifactId"] == identifiers[0])["expired"]
+        with artifact_queries() as queries:
+            snapshot = (await call(assistant, "task.get", taskId=tasks[0].id)).structured_content
+        assert len(queries) == 1
+        errors = {a["artifactId"]: a.get("error") for a in snapshot["artifacts"]}
+        assert errors[foreign] == errors[missing] == "Artifact not found"
+        assert errors[identifiers[0]] == "Artifact has expired"
+        with artifact_queries() as queries:
+            snapshots = (await call(assistant, "task.list")).structured_content["tasks"]
+        assert len(queries) == 1 and len(snapshots) == 2
+        assert "Foreign private output" not in str(snapshots)
 
 
 async def test_raw_credential_pause_survives_restart_and_cancel(environment, monkeypatch):
@@ -627,11 +857,12 @@ async def test_raw_credential_pause_survives_restart_and_cancel(environment, mon
 
 
 async def test_raw_code_context_and_automatic_panel_persistence(environment, monkeypatch):
+    import importlib
+
+    from sqlalchemy import func, select
+
     from wotbot.agent.tools.run_code import _code_executor_client
     from wotbot.panels.models import Panel, PanelVersion
-    from sqlalchemy import select, func
-
-    import importlib
 
     panel_module = importlib.import_module("wotbot.agent.tools.create_web_interface")
     monkeypatch.setattr(
@@ -704,8 +935,8 @@ async def test_raw_code_context_and_automatic_panel_persistence(environment, mon
 
 
 async def test_explicit_intents_skip_classifier_without_leaking_to_next_call(environment):
-    from wotbot.agent.nodes import make_router_node, IntentClassification
     from wotbot.agent.intents import INTENTS
+    from wotbot.agent.nodes import IntentClassification, make_router_node
 
     model = type("SimpleModel", (), {})()
     classifier = AsyncMock(return_value=IntentClassification(intent="chat"))
@@ -723,12 +954,12 @@ async def test_explicit_intents_skip_classifier_without_leaking_to_next_call(env
 
 async def test_tool_catalog_paginates_after_future_additions(environment, monkeypatch):
     from types import SimpleNamespace
-    from mcp.types import Tool
+
     from mcp.shared.exceptions import MCPError
+    from mcp.types import Tool
 
     owner, _, other, *_ = environment
-    monkeypatch.setattr("wotbot.mcp.server._request_user", lambda: principal(owner))
-    monkeypatch.setattr("wotbot.mcp.server.client_supports_apps", lambda ctx: False)
+    monkeypatch.setattr("wotbot.mcp.server.request_user", lambda: principal(owner))
     raw = MCPToolRuntime(profile="raw", get_runtime=lambda: None, settings=Settings())
     for number in range(65):
         name = f"future.tool.{number}"
@@ -744,6 +975,6 @@ async def test_tool_catalog_paginates_after_future_additions(environment, monkey
         if not cursor:
             break
     assert set(names) == set(raw.tools) and len(names) == len(set(names))
-    monkeypatch.setattr("wotbot.mcp.server._request_user", lambda: principal(other))
+    monkeypatch.setattr("wotbot.mcp.server.request_user", lambda: principal(other))
     with pytest.raises(MCPError):
         await raw._list_tools(None, SimpleNamespace(cursor=first_cursor))

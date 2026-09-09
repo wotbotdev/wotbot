@@ -25,10 +25,10 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 
+from wotbot.core.agent_runs import _interrupted_turn_updates
 from wotbot.threads.runs import (
     RunRegistry,
     _event_name,
-    _interrupted_turn_updates,
     fork_before_message,
     stream_run,
 )

@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import re
+from contextlib import AsyncExitStack
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -12,6 +13,7 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 
 from wotbot.agent_api.downloads import ArtifactDownloadLinks, InvalidDownloadLink
 from wotbot.auth.providers import get_api_key_user
+from wotbot.clients.code_executor import CodeExecutorClient
 from wotbot.core.time import utc_now
 
 logger = logging.getLogger(__name__)
@@ -110,8 +112,6 @@ def install_downloads(app, settings):
         New bytes stay in the executor. Copies retained by the original A2A
         implementation remain downloadable until their original expiry.
         """
-        from wotbot.agent_api.outputs import executor_headers
-
         record = await ArtifactStore().get(
             artifact_id, owner=request.state.a2a_user.api_key_id, include_content=True
         )
@@ -142,23 +142,17 @@ def install_downloads(app, settings):
         if not record.executor_artifact_id:
             return _artifact_error("Artifact not found", 404)
 
-        url = (
-            f"{settings.code_executor_url.rstrip('/')}"
-            f"/artifacts/{quote(record.executor_artifact_id, safe='')}/content"
-        )
-        client = httpx.AsyncClient(timeout=settings.code_executor_timeout_seconds)
+        stream = AsyncExitStack()
         try:
-            upstream = await client.send(
-                client.build_request("GET", url, headers=executor_headers(settings)),
-                stream=True,
+            upstream = await stream.enter_async_context(
+                CodeExecutorClient(settings).stream_artifact(record.executor_artifact_id)
             )
         except httpx.HTTPError:
-            await client.aclose()
+            await stream.aclose()
             logger.exception("Could not reach the code executor for artifact=%s", artifact_id)
             return _artifact_error("Artifact is temporarily unavailable", 503)
         if upstream.status_code != 200:
-            await upstream.aclose()
-            await client.aclose()
+            await stream.aclose()
             # The executor's own retention swept it before this link expired.
             return _artifact_error(
                 "Artifact has expired"
@@ -170,18 +164,14 @@ def install_downloads(app, settings):
         if "content-length" in upstream.headers:
             headers["Content-Length"] = upstream.headers["content-length"]
 
-        async def close():
-            await upstream.aclose()
-            await client.aclose()
-
         if request.method == "HEAD":
-            await close()
+            await stream.aclose()
             return Response(status_code=200, media_type=record.media_type, headers=headers)
         return StreamingResponse(
             upstream.aiter_bytes(),
             media_type=record.media_type,
             headers=headers,
-            background=BackgroundTask(close),
+            background=BackgroundTask(stream.aclose),
         )
 
 

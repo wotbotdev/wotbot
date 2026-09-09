@@ -406,7 +406,7 @@ async def _with_camera_context(
                 content=(
                     "This request comes from an external agent through the agent API, with no chat UI. "
                     "Use the normal tools and router. Generated outputs are exported as artifacts; "
-                    "panels are saved automatically and include a panel link and MCP Apps descriptor. "
+                    "panels are saved automatically and include a panel link. "
                     "Explain results independently of those outputs. Do not refer to a panel above, "
                     "a download button, or invent URLs. Credentials are provisioned through the "
                     "existing credential API and must never be requested in conversation content."

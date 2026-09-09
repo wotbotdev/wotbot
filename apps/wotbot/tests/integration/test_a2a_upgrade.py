@@ -19,21 +19,22 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
-from .test_a2a import fake_executor, finish, graph_for, request, running
-from wotbot.a2a.artifacts import ArtifactStore
-from wotbot.a2a.constants import MCP_APP_MIME_TYPE
-from wotbot.a2a.interrupts import describe_interrupt
-from wotbot.a2a.models import A2AArtifactRecord, A2AMessageRecord, A2ATaskRecord
 from wotbot.a2a.server import install_a2a
-from wotbot.a2a.store import TaskStore, request_fingerprint
+from wotbot.a2a.store import TaskStore
+from wotbot.agent_api.artifacts import ArtifactStore
+from wotbot.agent_api.interrupts import describe_interrupt
+from wotbot.agent_api.models import AgentArtifactRecord, AgentMessageRecord, AgentTaskRecord
+from wotbot.agent_api.store import request_fingerprint
 from wotbot.api_keys.store import create_api_key
 from wotbot.core.database import get_session_factory, get_sqlalchemy_engine, init_db
 from wotbot.core.settings import Settings
 from wotbot.core.time import utc_now
-from wotbot.mcp_apps.service import load_pinned_version
+from wotbot.panels.models import PanelVersion
 from wotbot.panels.service import PanelService
 from wotbot.threads.models import Thread
 from wotbot.virtual_things.db import VirtualThing
+
+from .test_a2a import fake_executor, finish, graph_for, request, running
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
 
@@ -236,12 +237,14 @@ async def test_upgrade_preserves_pauses_contexts_retry_identity_panels_and_downl
         session.commit()
     panel_artifact_id = str(uuid4())
     with get_sqlalchemy_engine().begin() as connection:
+        # Written as the retired MCP Apps code wrote it; upgrades must still
+        # carry these rows forward untouched.
         panel_export = dict(
             id=panel_artifact_id,
             task_id=task_id,
             owner=owner,
             name="Saved",
-            media_type=MCP_APP_MIME_TYPE,
+            media_type="text/html;profile=mcp-app",
             panel_version_id=version_id,
             created_at=now,
             metadata={
@@ -278,8 +281,8 @@ async def test_upgrade_preserves_pauses_contexts_retry_identity_panels_and_downl
         assert session.get(VirtualThing, virtual_id).owner_thread_id == thread_id
         service = PanelService(session)
         assert service.get_panel(panel["id"], include_html=True)["html"] == "<p>Edited</p>"
-    pinned = await load_pinned_version(version_id)
-    assert pinned.html == "<p>Original</p>"
+        # Editing the panel must not rewrite the pinned historical version.
+        assert session.get(PanelVersion, version_id).html == "<p>Original</p>"
     panel_record = await ArtifactStore().get(panel_artifact_id, owner=owner)
     assert panel_record.artifact_metadata["subscriptions"] == ["sub-old"]
 
@@ -320,7 +323,9 @@ async def test_upgrade_preserves_pauses_contexts_retry_identity_panels_and_downl
             await finish(runtime, followup.task)
             assert followup.thread_id == thread_id and followup.task.context_id == context_id
             with get_session_factory()() as session:
-                session.get(A2AArtifactRecord, artifact_id).expires_at = now - timedelta(seconds=1)
+                session.get(AgentArtifactRecord, artifact_id).expires_at = now - timedelta(
+                    seconds=1
+                )
                 session.commit()
             await runtime.sweep()
             expired = await ArtifactStore().get(artifact_id, owner=owner, include_content=True)
@@ -375,8 +380,11 @@ async def test_upgrade_blocks_ambiguous_message_ids_without_deleting_tasks(upgra
             )
     init_db()
     with get_session_factory()() as session:
-        assert all(session.get(A2ATaskRecord, task_id) for task_id in task_ids)
-        identity = session.get(A2AMessageRecord, (owner, "reused-continuation"))
+        assert all(session.get(AgentTaskRecord, task_id) for task_id in task_ids)
+        identity = session.get(
+            AgentMessageRecord,
+            {"owner": owner, "family": "assistant", "message_id": "reused-continuation"},
+        )
         assert identity.task_id == task_ids[-1]
         assert identity.request_hash == "conflict"
     from a2a.utils.errors import InvalidParamsError

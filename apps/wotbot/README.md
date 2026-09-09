@@ -58,17 +58,16 @@ Automation jobs use the same graph and persistence model as normal conversations
 
 Live voice uses a self-hosted LiveKit Server plus the `wotbot livekit-agent` worker. The worker handles realtime media, speech-to-text, text-to-speech, interruption handling, transcription forwarding, and the bridge back into the LangGraph assistant.
 
-## A2A and MCP Apps
+## A2A and MCP
 
 The opt-in A2A 1.0 HTTP+JSON interface uses the official SDK and the existing
 LangGraph assistant. One Agent Card advertises `chat`, `control`, `analysis`,
 `jobs`, `virtual_things`, and `discovery`; the router selects the intent.
 
 `A2A_ENABLED=true` enables the public `/.well-known/agent-card.json`, authenticated
-`/a2a/v1` execution/task routes, `/a2a/artifacts` downloads, and the focused
-`/mcp/apps` server for generated panels. API keys need `agent:invoke`, which
-delegates all enabled assistant capabilities. Contexts, tasks, downloads, and MCP
-resources are isolated by API-key ID. A2A threads remain hidden from chat.
+`/a2a/v1` execution/task routes, and `/a2a/artifacts` downloads. API keys need
+`agent:invoke`, which delegates all enabled assistant capabilities. Contexts,
+tasks, and downloads are isolated by API-key ID. A2A threads remain hidden from chat.
 File and image outputs include temporary download links usable by browsers
 without an API key. Links expire after one hour by default; retrieving the task
 refreshes them. Canonical download URLs still require the owning API key.
@@ -80,7 +79,7 @@ records live in `a2a/models.py`, with migrations `0008_add_a2a` and
 panels use the existing panel service and immutable initial panel versions.
 
 See the [connection and rollout guide](../../docs/a2a.md) for examples, ownership,
-pauses, artifact formats, MCP Apps setup, and retention. The experimental
+pauses, artifact formats, and retention. The experimental
 `/api/a2a` routes and handwritten protocol models have been removed.
 
 ## Persistence And Migrations

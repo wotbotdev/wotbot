@@ -9,12 +9,11 @@ from wotbot.agent_api.downloads import InvalidDownloadLink as InvalidDownloadLin
 
 
 class ArtifactDownloadLinks(SharedDownloadLinks):
-    async def _present_artifact(self, owner: str, artifact: Artifact):
+    async def _present_artifact(self, artifact: Artifact, record):
         # Structured results and panel descriptors have no downloadable URL
         # parts. Panels keep their separate MCP launch-grant mechanism.
         if not any(part.HasField("url") for part in artifact.parts):
             return
-        record = await self.artifacts.get(artifact.artifact_id, owner=owner)
         if record is None or record.panel_version_id or record.expires_at is None:
             return
         issued = await self._issue(record)
@@ -39,6 +38,10 @@ class ArtifactDownloadLinks(SharedDownloadLinks):
         copy = type(event)()
         copy.CopyFrom(event)
         artifacts = copy.artifacts if isinstance(copy, Task) else [copy.artifact]
+        records = await self.artifacts.get_many(
+            [a.artifact_id for a in artifacts if any(p.HasField("url") for p in a.parts)],
+            owner=owner,
+        )
         for artifact in artifacts:
-            await self._present_artifact(owner, artifact)
+            await self._present_artifact(artifact, records.get(artifact.artifact_id))
         return copy

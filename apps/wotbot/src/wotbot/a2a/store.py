@@ -2,33 +2,31 @@
 
 from dataclasses import replace
 
-from a2a.types import Task
-from google.protobuf.json_format import MessageToDict, ParseDict
+from google.protobuf.json_format import MessageToDict
 
 from wotbot.a2a.adapter import query, to_wire, translate
-from wotbot.agent_api.store import ACTIVE as ACTIVE
-from wotbot.agent_api.store import PAUSED as PAUSED
-from wotbot.agent_api.store import RESERVED as RESERVED
 from wotbot.agent_api.store import TaskStore as AgentTaskStore
-from wotbot.agent_api.store import request_fingerprint as request_fingerprint
-from wotbot.agent_api.store import task_identity as task_identity
 from wotbot.agent_api.types import Task as AgentTask
 
 
-def task_json(task):
-    return MessageToDict(task)
-
-
-def task_from_json(payload):
-    return ParseDict({k: v for k, v in payload.items() if k != "payloadVersion"}, Task())
-
-
 class TaskStore:
+    """Wire-format view of the neutral store.
+
+    Only the four methods that cross the A2A boundary convert; the rest of the
+    neutral store's surface is protocol-independent and forwarded verbatim.
+    """
+
     def __init__(self, *, neutral=None, **kwargs):
         self.neutral = neutral or AgentTaskStore(**kwargs)
 
-    def __getattr__(self, name):
-        return getattr(self.neutral, name)
+    def thread_id(self, owner, task_id):
+        return self.neutral.thread_id(owner, task_id)
+
+    def prune(self):
+        return self.neutral.prune()
+
+    def delete_contexts(self, thread_ids):
+        return self.neutral.delete_contexts(thread_ids)
 
     @translate
     def admit(self, owner, request):
@@ -37,8 +35,7 @@ class TaskStore:
 
     @translate
     def get(self, owner, task_id):
-        self.neutral.require_family(owner, task_id, "assistant")
-        return to_wire(self.neutral.get(owner, task_id))
+        return to_wire(self.neutral.get(owner, task_id, "assistant"))
 
     @translate
     def save(self, owner, task, pending=None):

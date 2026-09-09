@@ -253,7 +253,7 @@ class Settings(BaseSettings):
     registry_database_url: str = "postgresql://wotbot:wotbot@localhost:5432/wotbot"
     registry_public_url: str = "http://localhost:8000"
 
-    # Inbound agents and generated MCP Apps share the existing assistant stack.
+    # Inbound agents reach the existing assistant stack over A2A and MCP.
     a2a_enabled: bool = False
     mcp_enabled: bool = False
     public_ui_origin: str = "http://localhost:3000"

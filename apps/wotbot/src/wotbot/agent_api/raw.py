@@ -89,11 +89,21 @@ def build_raw_graph(checkpointer, *, subscriptions=None, tools=None):
                 "credential_required",
                 "credential_rejected",
             }:
-                interrupt({"kind": "credential", **result})
-                # Resume re-enters execute. A repeated rejection must not loop.
-                result = {
-                    "error": "Credentials were cancelled or rejected again; no automatic retry was made"
-                }
+                if result.get("retry_exhausted"):
+                    # The tool ran its own credential interrupt and the one
+                    # allowed retry was rejected. Interrupting again would ask a
+                    # second time and, because the resume restarts this node,
+                    # dispatch the call once more.
+                    result = {
+                        **result,
+                        "error": "Credentials were rejected again; no automatic retry was made",
+                    }
+                else:
+                    interrupt({"kind": "credential", **result})
+                    # Resume re-enters execute. A repeated rejection must not loop.
+                    result = {
+                        "error": "Credentials were cancelled or rejected again; no automatic retry was made"
+                    }
             error = result_error(result)
         except GraphBubbleUp:
             raise

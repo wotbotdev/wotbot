@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import warnings
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated, TypedDict
@@ -20,11 +21,12 @@ from langgraph.graph import START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.types import interrupt
 from sqlalchemy import text
+from sqlalchemy.exc import SAWarning
 
-from wotbot.a2a.models import A2AArtifactRecord, A2ATaskRecord
 from wotbot.a2a.runtime import A2ARuntime
 from wotbot.a2a.server import build_agent_card, install_a2a
 from wotbot.a2a.store import TaskStore
+from wotbot.agent_api.models import AgentArtifactRecord, AgentTaskRecord
 from wotbot.api_keys.models import ApiKey
 from wotbot.api_keys.store import create_api_key
 from wotbot.core.agent_runs import RunRegistry
@@ -464,7 +466,7 @@ async def test_artifacts_stream_from_the_executor_and_expire_with_owner_isolatio
 
             # Nothing was copied: the row points at the executor's identifier.
             with get_session_factory()() as session:
-                stored = session.get(A2AArtifactRecord, task.artifacts[2].artifact_id)
+                stored = session.get(AgentArtifactRecord, task.artifacts[2].artifact_id)
                 assert stored.executor_artifact_id == "export-id"
                 assert not hasattr(stored, "content")
 
@@ -486,7 +488,7 @@ async def test_artifacts_stream_from_the_executor_and_expire_with_owner_isolatio
                     await client.get(url, headers={"Authorization": f"Bearer {token2}"})
                 ).status_code == 404
                 with get_session_factory()() as session:
-                    session.get(A2AArtifactRecord, artifact.artifact_id).expires_at = (
+                    session.get(AgentArtifactRecord, artifact.artifact_id).expires_at = (
                         utc_now() - timedelta(seconds=1)
                     )
                     session.commit()
@@ -535,7 +537,7 @@ async def test_download_reports_410_when_the_executor_has_swept_the_bytes(enviro
 
 
 async def test_export_failure_is_explicit_and_invalid_tool_outputs_are_ignored(environment):
-    from wotbot.a2a.outputs import ArtifactCollector
+    from wotbot.agent_api.outputs import ArtifactCollector
 
     owner = environment[0]
 
@@ -591,7 +593,7 @@ async def test_retention_retires_expired_tasks_and_their_conversations(environme
         ]
 
         with get_session_factory()() as session:
-            session.get(A2ATaskRecord, a.task.id).expires_at = utc_now() - timedelta(seconds=1)
+            session.get(AgentTaskRecord, a.task.id).expires_at = utc_now() - timedelta(seconds=1)
             session.commit()
 
         await runtime.sweep()
@@ -611,6 +613,32 @@ async def test_retention_retires_expired_tasks_and_their_conversations(environme
         again = await runtime.admit(owner, request(id="expiring"))
         await finish(runtime, again.task)
         assert again.task.context_id != context_id
+
+
+async def test_expired_task_identity_is_reused_without_a_stale_message_row(environment):
+    owner = environment[0]
+
+    async def node(state):
+        return {"messages": [AIMessage(content="Done")]}
+
+    async with running(graph_for(node)) as runtime:
+        runtime.owner = owner
+        first = await runtime.admit(owner, request(id="outliving"))
+        await finish(runtime, first.task)
+        with get_session_factory()() as session:
+            session.get(AgentTaskRecord, first.task.id).expires_at = utc_now() - timedelta(
+                seconds=1
+            )
+            session.commit()
+        # Expired but not yet swept: admission deletes the task and re-adds the
+        # same retry identity, so the cascaded row must leave the session too.
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", SAWarning)
+            again = await runtime.admit(owner, request(id="outliving"))
+        await finish(runtime, again.task)
+        assert again.task.id == first.task.id
+        assert again.task.context_id != first.task.context_id
+        assert runtime.store.get(owner, again.task.id).context_id == again.task.context_id
 
 
 async def test_a2a_contexts_are_not_reachable_through_the_chat_routes(environment):
@@ -671,80 +699,52 @@ async def test_a2a_contexts_are_not_reachable_through_the_chat_routes(environmen
         assert (await finish(runtime, admitted.task)).status.state == TaskState.TASK_STATE_COMPLETED
 
 
-async def test_mcp_apps_panels_immutable_grants_binary_subscriptions_and_deletion(
-    environment, monkeypatch
-):
-    import base64
-    from unittest.mock import AsyncMock, patch
-
-    import redis.asyncio as redis
-
-    from wotbot.a2a.artifacts import ArtifactStore
-    from wotbot.a2a.outputs import ArtifactCollector
+async def test_generated_panel_is_saved_and_exported_as_a_panel_pointer(environment):
+    from wotbot.agent_api.artifacts import ArtifactStore
+    from wotbot.agent_api.outputs import PANEL_MEDIA_TYPE, ArtifactCollector
     from wotbot.core.agent_runs import RunEvent
-    from wotbot.mcp_apps.server import MCPPanelRuntime
     from wotbot.panels.models import Panel, PanelVersion
     from wotbot.panels.render import wrap_panel_document
-    from wotbot.panels.service import PanelService
 
     owner, token, other, token2, limited = environment
     markup = "<button onclick=\"wot.writeProperty('lamp','power',true)\">On</button>"
-    caps = [
-        {
-            "thingId": "lamp",
-            "affordances": ["power", "media", "changed"],
-            "ops": [
-                "readProperty",
-                "writeProperty",
-                "invokeAction",
-                "observeProperty",
-                "subscribeEvent",
-            ],
-        }
-    ]
+    caps = [{"thingId": "lamp", "affordances": ["power"], "ops": ["writeProperty"]}]
     collector = ArtifactCollector(
         settings=Settings(), owner=owner, task_id="panel-task", thread_id="hidden"
     )
-
-    async def make_panel(call_id):
-        event = RunEvent(
-            "values",
-            {
-                "messages": [
-                    AIMessage(
-                        content="",
-                        tool_calls=[
-                            {
-                                "id": call_id,
-                                "name": "create_web_interface",
-                                "args": {"html": markup, "title": "Lamp"},
-                            }
-                        ],
+    event = RunEvent(
+        "values",
+        {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "id": "first",
+                            "name": "create_web_interface",
+                            "args": {"html": markup, "title": "Lamp"},
+                        }
+                    ],
+                ),
+                ToolMessage(
+                    id="first",
+                    tool_call_id="first",
+                    content=json.dumps(
+                        {
+                            "artifacts": [
+                                {"kind": "web", "filename": "preview.html", "capabilities": caps}
+                            ]
+                        }
                     ),
-                    ToolMessage(
-                        id=call_id,
-                        tool_call_id=call_id,
-                        content=json.dumps(
-                            {
-                                "artifacts": [
-                                    {
-                                        "kind": "web",
-                                        "filename": "preview.html",
-                                        "capabilities": caps,
-                                    }
-                                ]
-                            }
-                        ),
-                    ),
-                ]
-            },
-        )
-        result = await collector.consume(event, seen=set())
-        assert len(result) == 1
-        return result[0], MessageToDict(result[0].parts[0])["data"]
+                ),
+            ]
+        },
+    )
+    result = await collector.consume(event, seen=set())
+    assert len(result) == 1
+    artifact = result[0]
+    descriptor = artifact.parts[0].data
 
-    artifact, descriptor = await make_panel("first")
-    artifact2, descriptor2 = await make_panel("second")
     with get_session_factory()() as session:
         panel = session.get(Panel, descriptor["panelId"])
         version = session.get(PanelVersion, descriptor["panelVersionId"])
@@ -752,268 +752,13 @@ async def test_mcp_apps_panels_immutable_grants_binary_subscriptions_and_deletio
         assert panel.capabilities == version.capabilities == caps
         assert version.source == "initial"
         assert markup in wrap_panel_document(panel.html, panel.title)
+
+    # The export is a pointer to the panel the UI serves, not the markup itself.
+    assert descriptor["kind"] == "wotbot.panel"
     assert descriptor["panelUrl"] == f"http://localhost:3000/panels?panelId={descriptor['panelId']}"
-
-    binary = {"kind": "binary", "contentType": "image/png", "bodyBase64": "AQI=", "sizeBytes": 2}
-
-    def result(value):
-        return {"result": {"success": True, "payload": {"data": value}}}
-
-    device = AsyncMock()
-    device.read_property.return_value = result(binary)
-    device.write_property.return_value = result(True)
-    device.invoke_action.return_value = result(binary)
-    device.observe_property.return_value = {"subscription_id": "sub-first"}
-    device.subscribe_event.return_value = {"subscription_id": "event-first"}
-    device.unsubscribe.return_value = {"ok": True}
-    monkeypatch.setattr("wotbot.mcp_apps.service.WotRuntimeClient", lambda settings: device)
-    mcp = MCPPanelRuntime(settings=Settings())
-    app = FastAPI()
-    mcp.install(app)
-
-    async with (
-        mcp.lifespan(),
-        httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app),
-            base_url="http://localhost:8000",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/json, text/event-stream",
-            },
-        ) as http,
-    ):
-        preflight = await http.options(
-            "/mcp/apps",
-            headers={
-                "Origin": "http://localhost:3000",
-                "Access-Control-Request-Method": "POST",
-                "Access-Control-Request-Headers": "Authorization,Mcp-Session-Id",
-            },
-        )
-        assert preflight.status_code == 200
-        assert preflight.headers["access-control-allow-origin"] == "http://localhost:3000"
-        assert (
-            await http.options(
-                "/mcp/apps",
-                headers={
-                    "Origin": "https://untrusted.example",
-                    "Access-Control-Request-Method": "POST",
-                },
-            )
-        ).status_code == 400
-        counter = 0
-
-        async def rpc(method, params, *, credential=None, headers=None):
-            nonlocal counter
-            counter += 1
-            response = await http.post(
-                "/mcp/apps",
-                json={"jsonrpc": "2.0", "id": counter, "method": method, "params": params},
-                headers={
-                    **(headers or {}),
-                    **({"Authorization": f"Bearer {credential}"} if credential else {}),
-                },
-            )
-            if method == "initialize" and response.status_code == 200:
-                http.headers["Mcp-Session-Id"] = response.headers["Mcp-Session-Id"]
-                http.headers["Mcp-Protocol-Version"] = "2025-11-25"
-            assert response.status_code == 200, response.text
-            bodies = [
-                json.loads(line[6:])
-                for line in response.text.splitlines()
-                if line.startswith("data: ")
-            ]
-            return bodies[-1] if bodies else response.json()
-
-        initialize = {
-            "protocolVersion": "2025-11-25",
-            "capabilities": {
-                "extensions": {
-                    "io.modelcontextprotocol/ui": {"mimeTypes": ["text/html;profile=mcp-app"]}
-                }
-            },
-            "clientInfo": {"name": "acceptance-host", "version": "1"},
-        }
-        await rpc("initialize", initialize)
-        listing = (await rpc("tools/list", {}))["result"]["tools"]
-        by_name = {tool["name"]: tool for tool in listing}
-        assert set(by_name) == {descriptor["toolName"], descriptor2["toolName"], "panels.call"}
-        assert by_name["panels.call"]["_meta"]["ui"]["visibility"] == ["app"]
-        assert (
-            by_name[descriptor["toolName"]]["_meta"]["ui"]["resourceUri"]
-            == descriptor["resourceUri"]
-        )
-        resource = (await rpc("resources/read", {"uri": descriptor["resourceUri"]}))["result"][
-            "contents"
-        ][0]
-        assert resource["mimeType"] == "text/html;profile=mcp-app"
-        assert resource["text"].index("window.wot =") < resource["text"].index(markup)
-        assert token not in resource["text"] and token2 not in resource["text"]
-        opened = (await rpc("tools/call", {"name": descriptor["toolName"], "arguments": {}}))[
-            "result"
-        ]
-        grant = opened["_meta"]["dev.wotbot/panel-launch"]["grant"]
-        opened2 = (await rpc("tools/call", {"name": descriptor2["toolName"], "arguments": {}}))[
-            "result"
-        ]
-        grant2 = opened2["_meta"]["dev.wotbot/panel-launch"]["grant"]
-
-        async def panel_call(tool, arguments, grant_value=grant):
-            return (
-                await rpc(
-                    "tools/call",
-                    {
-                        "name": "panels.call",
-                        "arguments": {"grant": grant_value, "tool": tool, "arguments": arguments},
-                    },
-                )
-            )["result"]
-
-        read = await panel_call(
-            "things.read_property", {"thingId": "lamp", "propertyName": "power"}
-        )
-        assert read["structuredContent"]["result"] == binary
-        write = await panel_call(
-            "things.write_property",
-            {
-                "thingId": "lamp",
-                "propertyName": "power",
-                "valueBase64": "AQI=",
-                "valueContentType": "image/png",
-            },
-        )
-        assert write["structuredContent"]["result"] is True
-        assert device.write_property.call_args.kwargs["value_base64"] == "AQI="
-        action = await panel_call(
-            "things.invoke_action",
-            {
-                "thingId": "lamp",
-                "actionName": "media",
-                "inputBase64": "AQI=",
-                "inputContentType": "image/png",
-            },
-        )
-        assert action["structuredContent"]["result"] == binary
-        assert device.invoke_action.call_args.kwargs["input_base64"] == "AQI="
-        device.invoke_action.return_value = result({"status": "credential_rejected"})
-        challenge = await panel_call(
-            "things.invoke_action", {"thingId": "lamp", "actionName": "media"}
-        )
-        assert "credential" in challenge["structuredContent"]["result"]["error"]
-        device.invoke_action.return_value = result(binary)
-        denied = await panel_call(
-            "things.write_property", {"thingId": "other", "propertyName": "power", "value": True}
-        )
-        assert denied["isError"] is True
-        assert (
-            await panel_call(
-                "things.read_property", {"thingId": "lamp", "propertyName": "power"}, "forged"
-            )
-        )["isError"]
-        # Subscribing hands back the stream position captured before it, and
-        # the panel carries that forward itself -- the server stores no cursor.
-        observed = await panel_call(
-            "things.observe_property", {"thingId": "lamp", "propertyName": "power"}
-        )
-        cursor = observed["structuredContent"]["result"]["cursor"]
-        settings = Settings()
-        redis_client = redis.from_url(settings.redis_url)
-        await redis_client.xadd(
-            settings.wot_runtime_stream,
-            {
-                "event_type": "property_observed",
-                "thing_id": "lamp",
-                "name": "power",
-                "subscription_id": "sub-first",
-                "content_type": "image/png",
-                "payload_base64": base64.b64encode(b"\x01\x02").decode(),
-                "timestamp": "now",
-            },
-        )
-        event = await panel_call(
-            "things.next_subscription_event",
-            {"subscriptionId": "sub-first", "timeoutMs": 100, "cursor": cursor},
-        )
-        assert event["structuredContent"]["result"]["event"]["value"] == binary
-        assert event["structuredContent"]["result"]["nextCursor"] > cursor
-        cross_panel = await panel_call(
-            "things.next_subscription_event", {"subscriptionId": "sub-first"}, grant2
-        )
-        assert cross_panel["isError"] is True
-        await panel_call("things.unsubscribe", {"subscriptionId": "sub-first"})
-        assert (
-            await panel_call("things.next_subscription_event", {"subscriptionId": "sub-first"})
-        )["isError"]
-        await redis_client.aclose()
-        # Saved UI links follow edits. MCP source and its allowed operations stay at generation version.
-        with get_session_factory()() as session:
-            PanelService(session).update_panel(
-                descriptor["panelId"],
-                html="<p>Edited</p>",
-                capabilities=[{"thingId": "new", "affordances": ["x"], "ops": ["invokeAction"]}],
-            )
-        same_resource = (await rpc("resources/read", {"uri": descriptor["resourceUri"]}))["result"][
-            "contents"
-        ][0]
-        assert same_resource["text"] == resource["text"]
-        assert (await panel_call("things.invoke_action", {"thingId": "new", "actionName": "x"}))[
-            "isError"
-        ]
-        # A second key of the same administrator has a separate MCP session and no resources.
-        first_session = http.headers.pop("Mcp-Session-Id")
-        await rpc("initialize", initialize, credential=token2)
-        assert (await rpc("resources/list", {}, credential=token2))["result"].get(
-            "resources", []
-        ) == []
-        assert "error" in await rpc(
-            "resources/read", {"uri": descriptor["resourceUri"]}, credential=token2
-        )
-        assert (
-            await rpc(
-                "tools/call",
-                {
-                    "name": "panels.call",
-                    "arguments": {
-                        "grant": grant,
-                        "tool": "things.read_property",
-                        "arguments": {"thingId": "lamp", "propertyName": "power"},
-                    },
-                },
-                credential=token2,
-            )
-        )["result"]["isError"]
-        http.headers["Mcp-Session-Id"] = first_session
-        from wotbot.discovery.store import client_for
-        from wotbot.mcp_apps.grants import PanelGrantStore
-
-        # Launch grants are Redis capabilities, like artifact download links.
-        await client_for(Settings().redis_url).delete(PanelGrantStore._key(grant2))
-        assert (
-            await panel_call(
-                "things.read_property", {"thingId": "lamp", "propertyName": "power"}, grant2
-            )
-        )["isError"]
-        # Re-wrapped from the pinned markup on every read, so a bridge fix
-        # reaches panels generated before it. The old design stored the wrapped
-        # bytes once and could never pick this up.
-        with patch("wotbot.mcp_apps.render._bridge", lambda: "/* patched-bridge-marker */"):
-            reread = await rpc("resources/read", {"uri": descriptor["resourceUri"]})
-        assert "patched-bridge-marker" in reread["result"]["contents"][0]["text"]
-        assert markup in reread["result"]["contents"][0]["text"]
-
-        with get_session_factory()() as session:
-            PanelService(session).delete_panel(descriptor["panelId"])
-        assert await ArtifactStore().get(artifact.artifact_id, owner=owner) is None
-        assert "error" in await rpc("resources/read", {"uri": descriptor["resourceUri"]})
-        assert (
-            await panel_call("things.read_property", {"thingId": "lamp", "propertyName": "power"})
-        )["isError"]
-        assert (
-            await http.post("/mcp/apps", json={}, headers={"Authorization": f"Bearer {limited}"})
-        ).status_code == 403
-        assert (
-            await http.post("/mcp/apps", json={}, headers={"Authorization": ""})
-        ).status_code == 401
+    record = await ArtifactStore().get(artifact.artifact_id, owner=owner)
+    assert record.media_type == PANEL_MEDIA_TYPE
+    assert record.artifact_metadata["descriptor"] == descriptor
 
 
 async def test_streaming_http_history_limits_terminal_subscription_and_cursor_pages(environment):
@@ -1046,8 +791,8 @@ async def test_streaming_http_history_limits_terminal_subscription_and_cursor_pa
             assert all(
                 e.HasField("status_update") or e.HasField("artifact_update") for e in events[1:]
             )
-            assert (events[-1].task.status if events[-1].HasField("task") else events[-1].status_update.status).state == TaskState.TASK_STATE_COMPLETED
-            assert (events[-1].task.status if events[-1].HasField("task") else events[-1].status_update.status).message.parts[0].text == "Streamed answer"
+            assert events[-1].status_update.status.state == TaskState.TASK_STATE_COMPLETED
+            assert events[-1].status_update.status.message.parts[0].text == "Streamed answer"
             task_id = events[0].task.id
             no_history = await http.get(f"/a2a/v1/tasks/{task_id}?historyLength=0")
             assert "history" not in no_history.json()
@@ -1131,7 +876,7 @@ async def test_http_return_immediately_and_cancel_paused_context(environment):
 
 
 async def test_export_failures_survive_a_pause_and_restart(environment):
-    from wotbot.a2a.outputs import ArtifactCollector
+    from wotbot.agent_api.outputs import ArtifactCollector
 
     owner = environment[0]
 
@@ -1255,6 +1000,36 @@ async def test_temporary_download_links_cover_streams_images_files_and_old_tasks
         )
 
 
+@pytest.mark.parametrize("namespace", ["a2a:download:", "mcp:panel-grant:"])
+async def test_preexisting_grants_keep_their_owner_and_namespace(environment, namespace):
+    import hashlib
+
+    from wotbot.core.artifact_grants import ArtifactGrantStore
+    from wotbot.discovery.store import client_for
+
+    owner, _, other, _, _ = environment
+    settings = Settings()
+    token = "a" * 43
+    artifact_id = str(uuid4())
+    expiry = utc_now() + timedelta(minutes=1)
+    # Write the old Redis layout directly, independently of the shared issuer.
+    await client_for(settings.redis_url).set(
+        namespace + hashlib.sha256(token.encode()).hexdigest(),
+        json.dumps({"artifactId": artifact_id, "owner": owner, "expiresAt": expiry.isoformat()}),
+        px=60_000,
+    )
+    grants = ArtifactGrantStore(settings.redis_url, namespace=namespace)
+    grant = await grants.resolve(token, owner=owner)
+    assert grant.artifact_id == artifact_id
+    assert grant.expires_at == expiry
+    assert await grants.resolve(token, owner=other) is None
+    other_namespace = "mcp:panel-grant:" if namespace == "a2a:download:" else "a2a:download:"
+    assert (
+        await ArtifactGrantStore(settings.redis_url, namespace=other_namespace).resolve(token)
+        is None
+    )
+
+
 async def _exercise_download_links(environment, settings):
     from urllib.parse import parse_qs, urlsplit
 
@@ -1366,7 +1141,7 @@ async def _exercise_download_links(environment, settings):
                 )
             ).status_code == 401
             redis = client_for(settings.redis_url)
-            grant_key = ArtifactDownloadLinks._key(download_token)
+            grant_key = ArtifactDownloadLinks(settings).grants.key(download_token)
             assert 0 < await redis.pttl(grant_key) <= 3600 * 1000
             await redis.delete(grant_key)  # Redis expiry has the same missing-key result.
             expired = await http.get(image_url, headers={"Authorization": ""})
@@ -1388,32 +1163,36 @@ async def _exercise_download_links(environment, settings):
             assert duplicate["id"] == task_id
             assert "downloadToken=" in duplicate["artifacts"][0]["parts"][0]["url"]
             with get_session_factory()() as session:
-                session.get(A2AArtifactRecord, file.artifact_id).expires_at = utc_now() + timedelta(
-                    seconds=15
+                session.get(AgentArtifactRecord, file.artifact_id).expires_at = (
+                    utc_now() + timedelta(seconds=15)
                 )
                 session.commit()
             short = (await http.get("/a2a/v1/tasks/" + task_id)).json()["artifacts"][1]
             assert short["metadata"]["downloadUrlExpiresAt"] <= short["metadata"]["expiresAt"]
             short_token = parse_qs(urlsplit(short["parts"][0]["url"]).query)["downloadToken"][0]
-            assert 0 < await redis.pttl(ArtifactDownloadLinks._key(short_token)) <= 15_000
+            assert (
+                0
+                < await redis.pttl(ArtifactDownloadLinks(settings).grants.key(short_token))
+                <= 15_000
+            )
             with get_session_factory()() as session:
-                session.get(A2AArtifactRecord, file.artifact_id).expires_at = utc_now() - timedelta(
-                    seconds=1
+                session.get(AgentArtifactRecord, file.artifact_id).expires_at = (
+                    utc_now() - timedelta(seconds=1)
                 )
                 session.commit()
             assert (
                 await http.get(short["parts"][0]["url"], headers={"Authorization": ""})
             ).status_code == 410
             with get_session_factory()() as session:
-                session.delete(session.get(A2AArtifactRecord, image.artifact_id))
+                session.delete(session.get(AgentArtifactRecord, image.artifact_id))
                 session.commit()
             assert (await http.get(fresh_url, headers={"Authorization": ""})).status_code == 404
 
 
 @pytest.mark.parametrize("change", ["revoked", "expired", "scope_removed"])
 async def test_download_grants_stop_working_when_the_owner_key_loses_access(environment, change):
-    from wotbot.a2a.artifacts import ArtifactStore
     from wotbot.a2a.downloads import ArtifactDownloadLinks
+    from wotbot.agent_api.artifacts import ArtifactStore
 
     owner, token, *_ = environment
     store = ArtifactStore()
@@ -1503,7 +1282,9 @@ async def test_retirement_serializes_with_followup_admission(environment, monkey
         first = await runtime.admit(owner, request())
         await finish(runtime, first.task)
         with get_session_factory()() as session:
-            session.get(A2ATaskRecord, first.task.id).expires_at = utc_now() - timedelta(seconds=1)
+            session.get(AgentTaskRecord, first.task.id).expires_at = utc_now() - timedelta(
+                seconds=1
+            )
             session.commit()
         entered, release, admission_started = asyncio.Event(), asyncio.Event(), asyncio.Event()
         original_delete = runtime.graph.checkpointer.adelete_thread
@@ -1543,7 +1324,9 @@ async def test_context_deletion_rechecks_for_new_tasks(environment):
         first = await runtime.admit(owner, request())
         await finish(runtime, first.task)
         with get_session_factory()() as session:
-            session.get(A2ATaskRecord, first.task.id).expires_at = utc_now() - timedelta(seconds=1)
+            session.get(AgentTaskRecord, first.task.id).expires_at = utc_now() - timedelta(
+                seconds=1
+            )
             session.commit()
         retired = await asyncio.to_thread(runtime.store.prune)
         followup = await runtime.admit(owner, request(context=first.task.context_id))

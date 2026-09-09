@@ -9,12 +9,10 @@ the existing WoTBot API service on port 8123.
 | `/mcp/assistant` | `ask_wotbot`: the assistant chooses the intent |
 | `/mcp/intents` | `intent.chat`, `intent.control`, `intent.analysis`, `intent.jobs`, `intent.virtual_things`, `intent.discovery` |
 | `/mcp/raw` | Direct device, catalog, discovery, code, panel, job, and virtual-Thing tools; no assistant LLM |
-| `/mcp/apps` | Existing generated-panel tools and resources |
 
-All three execution profiles also provide `task.get`, `task.list`, `task.resume`,
-`task.cancel`, `artifact.get`, `artifact.list`, generated `panel.open.<artifactId>`
-tools, and the app-only `panels.call`. Raw connections additionally provide
-`subscription.poll`. A tool belonging to another profile cannot be called by
+All three profiles also provide `task.get`, `task.list`, `task.resume`,
+`task.cancel`, `artifact.get`, and `artifact.list`. Raw connections additionally
+provide `subscription.poll`. A tool belonging to another profile cannot be called by
 name. New internal tools are private until explicitly added to the public catalog.
 
 ## Configuration and authentication
@@ -26,16 +24,15 @@ REGISTRY_PUBLIC_URL=http://localhost:8123
 PUBLIC_UI_ORIGIN=http://localhost:3000
 ```
 
-`MCP_ENABLED` defaults to false and enables the three execution profiles plus
-`/mcp/apps`. `A2A_ENABLED` independently enables A2A and continues to enable
-`/mcp/apps` for existing deployments. Downloads and panel assets work with either
-flag. Disabling a flag does not delete data.
+`MCP_ENABLED` defaults to false and enables the three profiles. `A2A_ENABLED`
+independently enables A2A. Artifact downloads mount for either flag. Disabling a
+flag does not delete data.
 
 Use an API key with `agent:invoke`, passed as `Authorization: Bearer <api-key>`.
 This is full delegation to the assistant's enabled capabilities, including writes,
 actions, code execution, and job creation. Direct credential and source-management
-APIs retain their existing scopes. Each key owns its contexts, tasks, artifacts,
-launch grants, and raw subscriptions, even when keys belong to one administrator.
+APIs retain their existing scopes. Each key owns its contexts, tasks, artifacts, and
+raw subscriptions, even when keys belong to one administrator.
 The deployment's Thing catalog, jobs, and saved Panels collection retain their
 existing sharing rules.
 
@@ -75,7 +72,9 @@ These are ordinary MCP `tools/call` arguments, not native MCP Tasks requests.
 Assistant and intent tools accept `message` text and/or `data` JSON. All execution
 calls require a unique `requestId` (1–200 characters). Repeating an identical
 request ID returns the existing task; changing its content is rejected. Keep the
-original request unchanged when retrying. The wait duration does not affect retry
+original request unchanged when retrying. Raw contexts keep their own identities,
+so a request ID spent on `/mcp/raw` is still available on the assistant and
+intent surfaces, and the reverse. The wait duration does not affect retry
 identity. This does not make a new request ID safe for repeating device actions.
 
 The tool returns readable text plus `structuredContent` containing `taskId`,
@@ -195,10 +194,7 @@ MCP image content when they fit the one-MiB combined preview budget; larger imag
 remain available through their download links. Plotly JSON and other structured
 results remain attached to the task.
 
-Generated panels are saved once, with an immutable initial version. Their
-WoTBot link opens the current saved panel, while the MCP App uses that immutable
-version. Relist tools to discover its `panel.open.<artifactId>` tool, then call it
-on the current connection. A2A panel descriptors continue to point to `/mcp/apps`.
-The existing Apps bridge, one-hour launch grants, saved capability allowlist,
-binary operations, and subscriptions are shared by all profiles. Deleting the
-panel invalidates its MCP resources and launch grants.
+Generated panels are saved once, with an immutable initial version. The panel
+artifact is a pointer, not the markup: its descriptor carries `panelId`,
+`panelVersionId`, and a `panelUrl` that opens the current saved panel in the
+WoTBot UI. Deleting the panel invalidates that link.

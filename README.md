@@ -42,14 +42,14 @@ The root Compose files are compatibility wrappers around the canonical stack in 
 Enable `A2A_ENABLED=true` to let external agents use WoTBot through the official
 A2A 1.0 HTTP+JSON interface. It shares the existing assistant graph and services;
 A2A conversations stay outside the chat UI. Generated panels are saved in Panels
-and can also run in an MCP Apps host through `/mcp/apps`.
+and returned as a link.
 
 Execution requires an API key with `agent:invoke`. Set `REGISTRY_PUBLIC_URL` and
 `PUBLIC_UI_ORIGIN` to the externally reachable backend and UI origins. The public
 Agent Card is at `/.well-known/agent-card.json`.
 
-See the [A2A and MCP Apps guide](./docs/a2a.md) for configuration, request and
-continuation examples, artifact formats, MCP host setup, and rollout checks.
+See the [inbound A2A guide](./docs/a2a.md) for configuration, request and
+continuation examples, artifact formats, and rollout checks.
 The experimental `/api/a2a` endpoints have been retired.
 
 ## External discovery

@@ -248,13 +248,11 @@ mcp_runtimes = []
 if surface_settings.a2a_enabled or surface_settings.mcp_enabled:
     from wotbot.a2a.server import install_a2a
     from wotbot.agent_api.http import install_downloads
-    from wotbot.mcp_apps.assets import router as mcp_assets_router
-    from wotbot.mcp_apps.server import MCPPanelRuntime
 
+    # Artifact downloads are shared, so they mount for either surface.
     install_downloads(app, surface_settings)
     if surface_settings.a2a_enabled:
         install_a2a(app, surface_settings)
-    mcp_runtimes.append(MCPPanelRuntime(settings=surface_settings))
     if surface_settings.mcp_enabled:
         from wotbot.mcp.server import MCPToolRuntime
 
@@ -266,6 +264,5 @@ if surface_settings.a2a_enabled or surface_settings.mcp_enabled:
                     get_runtime=lambda: getattr(app.state, "agent_runtime", None),
                 )
             )
-    app.include_router(mcp_assets_router)
     for mcp_runtime in mcp_runtimes:
         mcp_runtime.install(app)

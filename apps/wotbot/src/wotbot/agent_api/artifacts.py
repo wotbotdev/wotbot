@@ -105,50 +105,22 @@ class ArtifactStore:
                 session.expunge(row)
             return row
 
-    async def list_mcp_apps(
-        self,
-        *,
-        owner: str,
-        limit: int,
-        before: tuple[datetime, str] | None = None,
-    ) -> ArtifactPage:
-        return await asyncio.to_thread(self._list_mcp_apps, owner, limit, before)
+    async def get_many(
+        self, artifact_ids: list[str], *, owner: str
+    ) -> dict[str, AgentArtifactRecord]:
+        """Load an owned set for presentation, omitting deleted or foreign artifacts."""
+        if not artifact_ids:
+            return {}
+        return await asyncio.to_thread(self._get_many, artifact_ids, owner)
 
-    def _list_mcp_apps(
-        self,
-        owner: str,
-        limit: int,
-        before: tuple[datetime, str] | None,
-    ) -> ArtifactPage:
-        from wotbot.agent_api.constants import MCP_APP_MIME_TYPE
-
-        query = select(AgentArtifactRecord).where(
-            AgentArtifactRecord.owner == owner,
-            AgentArtifactRecord.media_type == MCP_APP_MIME_TYPE,
-            AgentArtifactRecord.artifact_metadata["bridgeVersion"].as_integer() == 2,
-        )
-        if before is not None:
-            created_at, artifact_id = before
-            query = query.where(
-                or_(
-                    AgentArtifactRecord.created_at < created_at,
-                    and_(
-                        AgentArtifactRecord.created_at == created_at,
-                        AgentArtifactRecord.id < artifact_id,
-                    ),
+    def _get_many(self, artifact_ids, owner):
+        with self._sessions()() as session:
+            rows = session.scalars(
+                select(AgentArtifactRecord).where(
+                    AgentArtifactRecord.id.in_(artifact_ids), AgentArtifactRecord.owner == owner
                 )
             )
-        query = query.order_by(
-            AgentArtifactRecord.created_at.desc(),
-            AgentArtifactRecord.id.desc(),
-        ).limit(limit + 1)
-        with self._sessions()() as session:
-            rows = list(session.scalars(query))
-            has_more = len(rows) > limit
-            rows = rows[:limit]
-            for row in rows:
-                session.expunge(row)
-            return ArtifactPage(items=rows, has_more=has_more)
+            return {row.id: row for row in rows}
 
     async def list_artifacts(self, *, owner, limit=50, before=None, task_id=None, context_id=None):
         return await asyncio.to_thread(
@@ -170,7 +142,10 @@ class ArtifactStore:
                     )
                 )
             )
-        if before:
+        return self._page(query, limit, before)
+
+    def _page(self, query, limit, before) -> ArtifactPage:
+        if before is not None:
             created, identifier = before
             query = query.where(
                 or_(
@@ -192,48 +167,3 @@ class ArtifactStore:
             for row in rows:
                 session.expunge(row)
             return ArtifactPage(rows[:limit], len(rows) > limit)
-
-    async def remember_subscription(
-        self, artifact_id: str, *, owner: str, subscription_id: str
-    ) -> None:
-        await asyncio.to_thread(self._edit_subscriptions, artifact_id, owner, subscription_id, True)
-
-    async def forget_subscription(
-        self, artifact_id: str, *, owner: str, subscription_id: str
-    ) -> None:
-        await asyncio.to_thread(
-            self._edit_subscriptions, artifact_id, owner, subscription_id, False
-        )
-
-    def _edit_subscriptions(
-        self, artifact_id: str, owner: str, subscription_id: str, remember: bool
-    ) -> None:
-        """Maintain the allowlist of subscriptions this panel opened.
-
-        Only membership is tracked. Stream position is carried by the panel and
-        passed back with each poll, so an active subscription writes nothing.
-        """
-        with self._sessions()() as session:
-            row = session.scalar(
-                select(AgentArtifactRecord)
-                .with_for_update()
-                .where(
-                    AgentArtifactRecord.id == artifact_id,
-                    AgentArtifactRecord.owner == owner,
-                )
-            )
-            if row is None:
-                return
-            metadata = dict(row.artifact_metadata or {})
-            current = list(metadata.get("subscriptions") or [])
-            if remember:
-                if subscription_id in current:
-                    return
-                updated = [*current, subscription_id]
-            else:
-                updated = [value for value in current if value != subscription_id]
-                if len(updated) == len(current):
-                    return
-            metadata["subscriptions"] = updated
-            row.artifact_metadata = metadata
-            session.commit()

@@ -4,7 +4,6 @@
 # otherwise shadow the builtin in its own siblings' return annotations.
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 from dataclasses import dataclass
@@ -25,6 +24,7 @@ from wotbot.agent_api.models import (
     AgentTaskRecord,
 )
 from wotbot.agent_api.types import Message, Operation, Part, Task, TaskQuery, TaskState
+from wotbot.core.cursors import decode_cursor, encode_cursor
 from wotbot.core.database import get_session_factory
 from wotbot.core.time import utc_now
 from wotbot.threads.models import Thread, ThreadKind
@@ -43,9 +43,16 @@ def task_from_json(payload: dict) -> Task:
     return Task.model_validate({k: v for k, v in payload.items() if k != "payloadVersion"})
 
 
-def task_identity(owner: str, message_id: str) -> str:
-    """Keep the task IDs issued by the cleanup; message records handle retries."""
-    return str(uuid5(NAMESPACE_URL, f"wotbot:a2a:{owner}:{message_id}"))
+def task_identity(owner: str, message_id: str, family: str = "assistant") -> str:
+    """Keep assistant IDs stable and isolate other families by UUID namespace.
+
+    Message records resolve retained retries before this is called, including
+    raw tasks issued under an earlier ID scheme.
+    """
+    namespace = NAMESPACE_URL
+    if family != "assistant":
+        namespace = uuid5(NAMESPACE_URL, f"wotbot:agent-tasks:{family}")
+    return str(uuid5(namespace, f"wotbot:a2a:{owner}:{message_id}"))
 
 
 def request_fingerprint(request: dict, *, legacy: bool = False) -> str:
@@ -122,9 +129,12 @@ class TaskStore:
             # the winner instead of failing a task/context uniqueness check.
             session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
-                {"identity": f"a2a-message:{owner}:{message_id}"},
+                {"identity": f"a2a-message:{owner}:{family}:{message_id}"},
             )
-            prior = session.get(AgentMessageRecord, (owner, message_id))
+            prior = session.get(
+                AgentMessageRecord,
+                {"owner": owner, "family": family, "message_id": message_id},
+            )
             if prior is not None:
                 row = session.get(AgentTaskRecord, prior.task_id)
                 if row.expires_at > now or row.state in ACTIVE:
@@ -144,6 +154,10 @@ class TaskStore:
                     )
                 session.delete(row)  # Cascades its expired retry identities.
                 session.flush()
+                # The cascade deleted this record in the database, but the loaded
+                # copy stays in the identity map and would collide with the
+                # identity re-added below.
+                session.expunge(prior)
             if message.get("taskId"):
                 row = self._owned(session, owner, message["taskId"])
                 self._check_family(row, family)
@@ -159,7 +173,7 @@ class TaskStore:
                 row.pending = None
             else:
                 resume = None
-                task_id = task_identity(owner, message_id)
+                task_id = task_identity(owner, message_id, family)
                 row = session.get(AgentTaskRecord, task_id)
                 if row is not None:
                     if row.expires_at > now or row.state in ACTIVE:
@@ -202,7 +216,11 @@ class TaskStore:
                 raise
             session.add(
                 AgentMessageRecord(
-                    owner=owner, message_id=message_id, request_hash=fingerprint, task_id=row.id
+                    owner=owner,
+                    family=family,
+                    message_id=message_id,
+                    request_hash=fingerprint,
+                    task_id=row.id,
                 )
             )
             return Admission(task, row.context_id, True, resume, operation)
@@ -241,15 +259,13 @@ class TaskStore:
         if row.family != family:
             raise TaskNotFoundError()
 
-    def operation(self, owner, task_id):
+    def operation(self, owner, task_id, *, family=None):
         with self.session_factory() as session:
-            return Operation.model_validate(self._owned(session, owner, task_id).operation or {})
+            return Operation.model_validate(
+                self._owned(session, owner, task_id, family).operation or {}
+            )
 
-    def require_family(self, owner, task_id, family):
-        with self.session_factory() as session:
-            self._check_family(self._owned(session, owner, task_id), family)
-
-    def _owned(self, session, owner: str, task_id: str) -> AgentTaskRecord:
+    def _owned(self, session, owner: str, task_id: str, family=None) -> AgentTaskRecord:
         row = session.scalar(
             select(AgentTaskRecord).where(
                 AgentTaskRecord.id == task_id,
@@ -259,11 +275,14 @@ class TaskStore:
         )
         if row is None:
             raise TaskNotFoundError()
+        if family is not None:
+            self._check_family(row, family)
         return row
 
-    def get(self, owner: str, task_id: str) -> Task:
+    def get(self, owner: str, task_id: str, family: str | None = None) -> Task:
         with self.session_factory() as session:
-            return task_from_json(self._owned(session, owner, task_id).payload)
+            row = self._owned(session, owner, task_id, family)
+            return task_from_json(row.payload)
 
     def thread_id(self, owner: str, task_id: str) -> str:
         with self.session_factory() as session:
@@ -298,13 +317,7 @@ class TaskStore:
         cursor = None
         if params.page_token:
             try:
-                if len(params.page_token) > 1024:
-                    raise ValueError("Token too long")
-                decoded = json.loads(
-                    base64.urlsafe_b64decode(
-                        params.page_token + "=" * (-len(params.page_token) % 4)
-                    )
-                )
+                decoded = decode_cursor(params.page_token, max_length=1024)
                 updated, identifier, filters = decoded
                 cursor = (datetime.fromisoformat(updated), str(identifier))
                 if not cursor[0].tzinfo or filters != filter_hash:
@@ -348,19 +361,7 @@ class TaskStore:
             token = ""
             if has_more:
                 last = page[-1]
-                token = (
-                    base64.urlsafe_b64encode(
-                        json.dumps(
-                            [
-                                last.updated_at.isoformat(),
-                                last.id,
-                                filter_hash,
-                            ]
-                        ).encode()
-                    )
-                    .decode()
-                    .rstrip("=")
-                )
+                token = encode_cursor([last.updated_at.isoformat(), last.id, filter_hash])
             return [task_from_json(row.payload) for row in page], total, token
 
     def recover(self) -> int:
