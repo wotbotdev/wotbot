@@ -21,6 +21,7 @@ if config.config_file_name is not None:
 
 def _import_models_for_metadata() -> None:
     """Register all SQLAlchemy models on Base.metadata for autogenerate."""
+    import wotbot.a2a.models
     import wotbot.api_keys.models
     import wotbot.catalog.credentials.models
     import wotbot.catalog.events.models

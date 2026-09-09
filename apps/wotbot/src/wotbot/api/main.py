@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
@@ -14,7 +14,6 @@ except ImportError:  # pragma: no cover - exercised when optional dep is absent 
 
 from wotbot.agent import build_graph
 from wotbot.agent.tools import LOCAL_TOOLS, REGISTRY_TOOLS
-from wotbot.api.a2a import router as a2a_router
 from wotbot.api.wot_runtime import router as wot_runtime_router
 from wotbot.api_keys.router import router as api_keys_router
 from wotbot.auth.router import router as me_router
@@ -156,11 +155,23 @@ async def lifespan(app: FastAPI):
             set_active_job_service(job_service)
             logger.info("Job API started")
 
-            yield
-            set_active_job_service(None)
-            await job_service.stop()
-            app.state.checkpointer = None
-            app.state.graph = None
+            try:
+                async with AsyncExitStack() as stack:
+                    if settings.a2a_enabled:
+                        from wotbot.a2a.runtime import A2ARuntime
+
+                        runtime = A2ARuntime(graph=graph, registry=run_registry, settings=settings)
+                        app.state.a2a_runtime = runtime
+                        await runtime.start()
+                        stack.push_async_callback(runtime.close)
+                        await stack.enter_async_context(mcp_runtime.lifespan())
+                    yield
+            finally:
+                app.state.a2a_runtime = None
+                set_active_job_service(None)
+                await job_service.stop()
+                app.state.checkpointer = None
+                app.state.graph = None
     finally:
         app.state.agent_settings = None
         await shutdown_backend_runtime(app)
@@ -178,7 +189,6 @@ app.include_router(wot_runtime_router)
 app.include_router(discovery_router)
 app.include_router(panels_router)
 app.include_router(virtual_things_router)
-app.include_router(a2a_router)
 
 
 def _current_settings() -> AgentSettings | None:
@@ -218,3 +228,13 @@ app.include_router(
         run_registry=run_registry,
     )
 )
+
+if AgentSettings().a2a_enabled:
+    from wotbot.a2a.server import install_a2a
+    from wotbot.mcp_apps.assets import router as mcp_assets_router
+    from wotbot.mcp_apps.server import MCPPanelRuntime
+
+    install_a2a(app, AgentSettings())
+    mcp_runtime = MCPPanelRuntime(settings=AgentSettings())
+    app.include_router(mcp_assets_router)
+    mcp_runtime.install(app)

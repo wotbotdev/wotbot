@@ -39,32 +39,18 @@ The root Compose files are compatibility wrappers around the canonical stack in 
 
 ## Agent-to-Agent (A2A) Integration
 
-WoTBot exposes a lightweight A2A HTTP surface so other agents can discover
-and send short messages into the agent runtime.
+Enable `A2A_ENABLED=true` to let external agents use WoTBot through the official
+A2A 1.0 HTTP+JSON interface. It shares the existing assistant graph and services;
+A2A conversations stay outside the chat UI. Generated panels are saved in Panels
+and can also run in an MCP Apps host through `/mcp/apps`.
 
-- `GET /api/a2a/agent-card` — returns a small JSON "agent card" describing
-  the agent and the A2A inbox.
-- `POST /api/a2a/message` — send a short message to be executed by the
-  WoTBot AG-UI runtime. The request body should be `{ "message": "..." }`.
+Execution requires an API key with `agent:invoke`. Set `REGISTRY_PUBLIC_URL` and
+`PUBLIC_UI_ORIGIN` to the externally reachable backend and UI origins. The public
+Agent Card is at `/.well-known/agent-card.json`.
 
-When running via the provided Docker Compose (`deploy/compose.yaml`) the
-API is published on the host at `http://localhost:8123` (the Compose file
-maps the container port `8123` to the host). Example:
-
-```bash
-# Agent discovery
-curl http://localhost:8123/api/a2a/agent-card
-
-# Send a message (requires the configured internal API key in Authorization header)
-curl -X POST http://localhost:8123/api/a2a/message \
-  -H "Authorization: Bearer <INTERNAL_API_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{"message":"Hello from other-agent"}'
-```
-
-Note: `POST /api/a2a/message` is a convenience endpoint that runs the message
-via the AG-UI runtime and returns the run events. For richer streaming (SSE)
-use the `/ag-ui` endpoint.
+See the [A2A and MCP Apps guide](./docs/a2a.md) for configuration, request and
+continuation examples, artifact formats, MCP host setup, and rollout checks.
+The experimental `/api/a2a` endpoints have been retired.
 
 ## External discovery
 

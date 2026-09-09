@@ -14,6 +14,7 @@ from wotbot.threads.messages import checkpoint_thread_state
 from wotbot.threads.models import (
     DEFAULT_THREAD_TITLE,
     CreateThreadRequest,
+    ThreadKind,
     UpdateThreadTitleRequest,
 )
 from wotbot.threads.store import (
@@ -26,6 +27,19 @@ from wotbot.threads.store import (
     delete_thread as delete_thread_metadata,
 )
 from wotbot.threads.runs import RunRegistry, fork_before_message, stream_run
+
+
+async def _reject_a2a_thread(thread_id: str) -> None:
+    """Keep A2A conversations reachable only through the A2A API.
+
+    New A2A context IDs are their thread IDs, and are handed to the calling
+    agent. Without this guard that ID could be replayed against these routes --
+    including through the UI's server-side proxy -- to read, continue or delete
+    another API key's conversation.
+    """
+    record = await asyncio.to_thread(get_thread, thread_id)
+    if record is not None and record["kind"] == ThreadKind.A2A.value:
+        raise HTTPException(status_code=404, detail="Thread not found")
 
 
 async def _get_thread_messages_payload(
@@ -132,6 +146,8 @@ def create_threads_router(
         body: CreateThreadRequest | None = Body(default=None),
     ):
         verify_internal_api_key(request)
+        if body and body.id:
+            await _reject_a2a_thread(body.id)
 
         return await _create_thread_record(body)
 
@@ -142,12 +158,14 @@ def create_threads_router(
         body: UpdateThreadTitleRequest,
     ):
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         return await _update_thread_record(thread_id=thread_id, body=body)
 
     @router.get("/{thread_id}")
     async def get_thread_by_id(thread_id: str, request: Request):
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         return await _thread_record_with_messages(
             get_checkpointer=get_checkpointer,
@@ -162,6 +180,7 @@ def create_threads_router(
         load history itself; it reads it from here.
         """
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         checkpointer = get_checkpointer()
         if checkpointer is None:
@@ -181,6 +200,7 @@ def create_threads_router(
         for the frame format it expects back.
         """
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         graph = get_graph()
         if graph is None:
@@ -213,6 +233,7 @@ def create_threads_router(
         so the superseded turn is replaced rather than duplicated.
         """
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         graph = get_graph()
         if graph is None:
@@ -245,12 +266,14 @@ def create_threads_router(
     async def post_thread_run_cancel(thread_id: str, request: Request):
         """Stop the in-flight run for this thread."""
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         return {"thread_id": thread_id, "cancelled": run_registry.cancel(thread_id)}
 
     @router.delete("/{thread_id}")
     async def delete_thread(thread_id: str, request: Request):
         verify_internal_api_key(request)
+        await _reject_a2a_thread(thread_id)
 
         # A finishing run synchronizes thread metadata after writing its final
         # checkpoint. Wait for that cleanup before deleting, otherwise the chat

@@ -49,9 +49,13 @@ def get_api_key_user(request: Request) -> User | None:
     if not auth_header or not auth_header.startswith("Bearer "):
         return None
 
-    token = auth_header[7:]
-    key_hash = hash_api_key(token)
     session_factory = getattr(request.app.state, "orm_session_factory", None)
+    return get_api_key_user_from_token(auth_header[7:], session_factory=session_factory)
+
+
+def get_api_key_user_from_token(token: str, *, session_factory=None) -> User | None:
+    """Resolve a live API key, retaining its identity independently of its user."""
+    key_hash = hash_api_key(token)
     if session_factory is None:
         session_factory = get_session_factory()
 
@@ -67,6 +71,7 @@ def get_api_key_user(request: Request) -> User | None:
             user_id=row.user_id,
             scopes=list(row.scopes or []),
             auth_type="api_key",
+            api_key_id=str(row.id),
         )
 
 

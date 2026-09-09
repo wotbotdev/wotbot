@@ -1,6 +1,7 @@
 """Canonical authorization scopes for external API keys and service users."""
 
 API_KEY_SCOPES: tuple[str, ...] = (
+    "agent:invoke",
     "things:read",
     "things:write",
     "things:delete",

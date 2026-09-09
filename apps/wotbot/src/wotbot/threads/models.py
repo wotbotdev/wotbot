@@ -17,12 +17,13 @@ DEFAULT_THREAD_TITLE = "New Chat"
 class ThreadKind(StrEnum):
     CHAT = "chat"
     JOB = "job"
+    A2A = "a2a"
 
 
 class Thread(Base):
     __tablename__ = "threads"
     __table_args__ = (
-        CheckConstraint("kind IN ('chat', 'job')", name="ck_threads_kind"),
+        CheckConstraint("kind IN ('chat', 'job', 'a2a')", name="ck_threads_kind"),
         Index("idx_threads_updated_at", "updated_at", "created_at"),
         Index("idx_threads_visible_kind", "kind", "visible", "updated_at"),
     )
@@ -38,6 +39,11 @@ class Thread(Base):
     )
     visible: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     job_id: Mapped[str | None] = mapped_column(String)
+    # Which API key owns this conversation. Set only for kind='a2a'.
+    owner_api_key_id: Mapped[str | None] = mapped_column(String, index=True)
+    # Older contexts had a separate public ID. Retain that alias without
+    # renaming the thread used by checkpoints, panels and virtual Things.
+    legacy_a2a_context_id: Mapped[str | None] = mapped_column(String, unique=True)
 
 
 class ThreadRecord(TypedDict):

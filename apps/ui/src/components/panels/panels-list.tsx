@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Maximize2, RefreshCw, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import { PanelFrame } from '@/components/wotbot/chat-tool-calls/panel-frame';
 import { PanelDrawer } from '@/components/panels/panel-drawer';
@@ -135,15 +136,14 @@ function PanelPreview({ panel }: { panel: PanelRecord }) {
 
 function PanelCard({
   panel,
-  onChanged,
+  onOpen,
   onDeleted,
 }: {
   panel: PanelRecord;
-  onChanged: (updated: PanelRecord) => void;
+  onOpen: (id: string) => void;
   onDeleted: (id: string) => void;
 }) {
   const [isDeleting, setIsDeleting] = useState(false);
-  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const handleDelete = async () => {
     setIsDeleting(true);
@@ -184,7 +184,7 @@ function PanelCard({
         <button
           aria-label={`Open ${panel.title}`}
           className="group relative block h-[18rem] w-full cursor-pointer"
-          onClick={() => setDrawerOpen(true)}
+          onClick={() => onOpen(panel.id)}
           type="button"
         >
           <div className="pointer-events-none absolute inset-0">
@@ -207,27 +207,33 @@ function PanelCard({
           <span>{new Date(panel.created_at).toLocaleDateString()}</span>
         ) : null}
       </CardFooter>
-
-      <PanelDrawer
-        onChanged={onChanged}
-        onOpenChange={setDrawerOpen}
-        open={drawerOpen}
-        panel={panel}
-      />
     </Card>
   );
 }
 
 export function PanelsList() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const selectedId = searchParams.get('panelId');
+  const selectPanel = (id: string | null) => {
+    const query = new URLSearchParams(searchParams.toString());
+    if (id) query.set('panelId', id);
+    else query.delete('panelId');
+    router.replace(`/panels${query.size ? `?${query}` : ''}`, {
+      scroll: false,
+    });
+  };
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
   const [panels, setPanels] = useState<PanelRecord[]>([]);
   const [isPending, setIsPending] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsPending(true);
     try {
       setPanels(await fetchPanels());
+      setHasLoaded(true);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : 'Failed to load panels',
@@ -260,6 +266,7 @@ export function PanelsList() {
   }, [deferredSearch, panels]);
 
   const hasSearch = deferredSearch.trim().length > 0;
+  const selectedPanel = panels.find((panel) => panel.id === selectedId);
 
   return (
     <div className="space-y-4">
@@ -306,6 +313,26 @@ export function PanelsList() {
         </div>
       </div>
 
+      {selectedId && hasLoaded && !isPending && !selectedPanel ? (
+        <div role="alert" className="rounded-md border px-4 py-3 text-sm">
+          This panel no longer exists or is unavailable.
+          <Button variant="link" onClick={() => selectPanel(null)}>
+            Dismiss
+          </Button>
+        </div>
+      ) : null}
+      {selectedPanel ? (
+        <PanelDrawer
+          key={selectedPanel.id}
+          panel={selectedPanel}
+          open
+          onChanged={handleChanged}
+          onOpenChange={(open) => {
+            if (!open) selectPanel(null);
+          }}
+        />
+      ) : null}
+
       {isPending ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {['s1', 's2', 's3'].map((key) => (
@@ -318,7 +345,7 @@ export function PanelsList() {
             <PanelCard
               key={panel.id}
               panel={panel}
-              onChanged={handleChanged}
+              onOpen={selectPanel}
               onDeleted={handleDeleted}
             />
           ))}

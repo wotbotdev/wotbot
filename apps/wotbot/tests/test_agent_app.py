@@ -64,7 +64,7 @@ class AgentAppRoutesTestCase(unittest.TestCase):
 
         fake_saver = object()
         fake_graph = FakeGraph()
-        fake_settings = Settings(agent_handoff_enabled=True)
+        fake_settings = Settings(agent_handoff_enabled=True, a2a_enabled=False)
         fake_job_service = AsyncMock()
 
         async def exercise() -> None:
@@ -223,7 +223,10 @@ class AgentAppRoutesTestCase(unittest.TestCase):
         self._set_settings(Settings(internal_api_key="test-internal-key"))
         wotbot_app.app.state.checkpointer = fake_checkpointer
 
-        with patch("wotbot.threads.routes.delete_thread_metadata", return_value=True):
+        with (
+            patch("wotbot.threads.routes.get_thread", return_value={"kind": "chat"}),
+            patch("wotbot.threads.routes.delete_thread_metadata", return_value=True),
+        ):
             response = self.client.delete(
                 "/threads/thread-a",
                 headers={"Authorization": "Bearer test-internal-key"},

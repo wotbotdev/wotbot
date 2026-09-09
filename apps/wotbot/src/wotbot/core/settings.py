@@ -253,6 +253,16 @@ class Settings(BaseSettings):
     registry_database_url: str = "postgresql://wotbot:wotbot@localhost:5432/wotbot"
     registry_public_url: str = "http://localhost:8000"
 
+    # Inbound agents and generated MCP Apps share the existing assistant stack.
+    a2a_enabled: bool = False
+    public_ui_origin: str = "http://localhost:3000"
+    mcp_allowed_hosts: str = ""
+    mcp_allowed_origins: str = ""
+    a2a_task_retention_days: int = Field(default=30, ge=1)
+    a2a_artifact_retention_days: int = Field(default=7, ge=1)
+    a2a_download_url_ttl_seconds: int = Field(default=3600, ge=1, le=86400)
+    a2a_max_artifact_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
+
     # External discovery candidates and downloads are short-lived capabilities.
     discovery_candidate_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
     discovery_download_ttl_seconds: int = Field(default=300, ge=30, le=3600)

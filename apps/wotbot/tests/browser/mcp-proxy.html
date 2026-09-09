@@ -1,0 +1,12 @@
+<!doctype html><title>MCP Apps sandbox proxy</title>
+<iframe id="app" sandbox="allow-scripts" title="Generated WoTBot panel" style="width:100%;height:460px;border:0"></iframe>
+<script>
+const frame = document.querySelector('#app');
+window.addEventListener('message', event => {
+  if (event.source === window.parent) {
+    if(event.data.method === 'ui/notifications/sandbox-resource-ready') frame.srcdoc = event.data.params.html;
+    else frame.contentWindow.postMessage(event.data, '*');
+  } else if(event.source === frame.contentWindow) window.parent.postMessage(event.data,'*');
+});
+window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/sandbox-proxy-ready',params:{}},'*');
+</script>

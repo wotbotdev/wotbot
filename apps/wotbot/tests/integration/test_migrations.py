@@ -168,3 +168,97 @@ def test_source_identity_foreign_keys_and_credential_cleanup(
             )
             is None
         )
+
+
+def test_a2a_migration_preserves_existing_chat_panels_jobs_and_virtual_ownership(
+    jobs_integration_environment,
+) -> None:
+    from wotbot.core.time import utc_now
+    from wotbot.jobs.db import JobRecord, JobRunRecord
+    from wotbot.panels.service import PanelService
+    from wotbot.threads.store import ThreadStore
+    from wotbot.virtual_things.db import VirtualThing
+
+    config = _alembic_config()
+    command.downgrade(config, "0007_add_thing_origin")
+    store = ThreadStore()
+    now = utc_now()
+    # Written as the pre-migration schema shaped it: at 0007 `threads` has no
+    # owner_api_key_id, so the current ORM model cannot read or write this row.
+    stamp = now.isoformat()
+    with get_session_factory()() as session:
+        session.execute(
+            text(
+                "INSERT INTO threads (id, title, created_at, updated_at, kind, visible)"
+                " VALUES (:id, :title, :created_at, :updated_at, 'chat', true)"
+            ),
+            {
+                "id": "preserved-chat",
+                "title": "My conversation",
+                "created_at": stamp,
+                "updated_at": stamp,
+            },
+        )
+        session.commit()
+    chat_id = "preserved-chat"
+    with get_session_factory()() as session:
+        panel = PanelService(session).create_panel(
+            title="Preserved", html="<p>Original</p>", capabilities=[], source_thread_id=chat_id
+        )
+        PanelService(session).update_panel(panel["id"], html="<p>Edited</p>")
+        versions = PanelService(session).list_versions(panel["id"])
+        session.add(
+            JobRecord(
+                id="preserved-job",
+                name="Interactive job",
+                created_from_thread_id=chat_id,
+                job_thread_id="job:preserved",
+                action_kind="prompt",
+                interaction_mode="required_checkin",
+                output_kind="narrative",
+                action={"kind": "prompt", "prompt": "Ask first"},
+                trigger_kind="time",
+                trigger={"kind": "time"},
+                output={"kind": "narrative"},
+                waiting_question="Proceed?",
+                active_run_id="preserved-run",
+                last_run_status="waiting_for_input",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.add(
+            VirtualThing(
+                id="preserved-virtual",
+                title="Virtual",
+                owner_thread_id=chat_id,
+                abstract_td={},
+                shared_state={"value": 42},
+            )
+        )
+        session.flush()
+        session.add(
+            JobRunRecord(
+                id="preserved-run",
+                job_id="preserved-job",
+                job_thread_id="job:preserved",
+                source="manual",
+                status="waiting_for_input",
+                result={"question": "Proceed?"},
+                started_at=now,
+                created_at=now,
+            )
+        )
+        session.commit()
+    command.upgrade(config, "head")
+    preserved = store.get(chat_id)
+    assert preserved["title"] == "My conversation" and preserved["kind"] == "chat"
+    with get_session_factory()() as session:
+        service = PanelService(session)
+        assert service.list_versions(panel["id"]) == versions
+        assert service.get_panel(panel["id"], include_html=True)["html"] == "<p>Edited</p>"
+        assert session.get(JobRecord, "preserved-job").waiting_question == "Proceed?"
+        assert session.get(JobRecord, "preserved-job").interaction_mode == "required_checkin"
+        assert session.get(JobRunRecord, "preserved-run").status == "waiting_for_input"
+        assert session.get(VirtualThing, "preserved-virtual").owner_thread_id == chat_id
+        assert session.get(VirtualThing, "preserved-virtual").shared_state == {"value": 42}

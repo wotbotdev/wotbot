@@ -10,7 +10,10 @@ class Settings(BaseSettings):
     max_sessions: int = 50
     log_level: str = "INFO"
     artifacts_dir: str = "/tmp/code-executor-artifacts"
-    artifacts_ttl_seconds: int = 3600
+    # Charts and images are referenced by links that outlive the chat turn
+    # or A2A task that produced them, so they keep the same retention as
+    # exported files rather than an hour.
+    artifacts_ttl_seconds: int = 604800
     file_artifacts_ttl_seconds: int = Field(default=604800, gt=0)
     artifact_max_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
     artifact_max_files_per_execution: int = Field(default=16, gt=0)

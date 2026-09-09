@@ -4,6 +4,8 @@ version = "0.1.1"
 description = "A LangChain-powered Web of Things agent with device registry integration"
 requires-python = ">=3.12"
 dependencies = [
+    "a2a-sdk[http-server]>=1.0.3,<1.1",
+    "mcp>=2.1.1,<3",
     "langchain>=0.3",
     "langchain-openai>=1.1",
     "langgraph>=0.4",
@@ -66,6 +68,10 @@ packages = ["src/wotbot"]
 "src/wotbot/catalog/enrichment/data/vocab/qudt-units.json" = "wotbot/catalog/enrichment/data/vocab/qudt-units.json"
 "src/wotbot/catalog/enrichment/data/shapes/td-enrichment.ttl" = "wotbot/catalog/enrichment/data/shapes/td-enrichment.ttl"
 "src/wotbot/panels/wot_bridge.js" = "wotbot/panels/wot_bridge.js"
+"src/wotbot/mcp_apps/wot_bridge.js" = "wotbot/mcp_apps/wot_bridge.js"
+"src/wotbot/mcp_apps/static/ext-apps-1.7.5.js" = "wotbot/mcp_apps/static/ext-apps-1.7.5.js"
+"src/wotbot/mcp_apps/static/ext-apps-LICENSE.txt" = "wotbot/mcp_apps/static/ext-apps-LICENSE.txt"
+"src/wotbot/mcp_apps/static/UPSTREAM.md" = "wotbot/mcp_apps/static/UPSTREAM.md"
 # Alembic config + the revision template are non-Python assets, so they must be
 # force-included for the runtime ``alembic upgrade head`` to find them in the
 # installed wheel. The ``env.py`` and ``versions/*.py`` ship as package code.

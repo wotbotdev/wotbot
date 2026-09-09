@@ -396,6 +396,21 @@ async def _with_camera_context(
     config: Optional[RunnableConfig],
     camera_frames_enabled: bool,
 ) -> list[BaseMessage]:
+    if config and config.get("configurable", {}).get("a2a"):
+        messages = [
+            messages[0],
+            SystemMessage(
+                content=(
+                    "This request comes from an external agent over A2A, with no chat UI. "
+                    "Use the normal tools and router. Generated outputs are exported as A2A artifacts; "
+                    "panels are saved automatically and include a panel link and MCP Apps descriptor. "
+                    "Explain results independently of those outputs. Do not refer to a panel above, "
+                    "a download button, or invent URLs. Credentials are provisioned through the "
+                    "existing credential API and must never be requested in conversation content."
+                )
+            ),
+            *messages[1:],
+        ]
     if not camera_frames_enabled:
         return messages
     attachment = await attach_latest_camera_frame(

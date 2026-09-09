@@ -3,12 +3,17 @@ services:
     build:
       context: ../apps/wotbot
       dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8123:8123"
     volumes:
       - ../apps/wotbot/src:/app/src:cached
       - ../apps/wotbot/tests:/app/tests:cached
     environment:
       LOG_LEVEL: "DEBUG"
       PYTHONPATH: "/app/src"
+      # External clients follow the Agent Card and artifact URLs through the
+      # published host port, rather than Docker's internal service DNS.
+      REGISTRY_PUBLIC_URL: "${REGISTRY_PUBLIC_URL:-http://localhost:8123}"
     command: ["wotbot", "serve", "--reload"]
 
   job-worker:

@@ -1,0 +1,20 @@
+<h2>Generated panel checks</h2><pre id="checks" aria-live="polite">Starting before host initialization…</pre>
+<script>
+(async () => {
+  const output = document.querySelector('#checks');
+  const assert = (condition, label) => { if (!condition) throw Error(label); output.textContent += '\nPASS '+label; };
+  const binary = await wot.readProperty('lamp','power');
+  assert(wot.isBinaryPayload(binary) && wot.binaryToBytes(binary)[1] === 2, 'binary read after queued startup');
+  const input = wot.binaryFromBytes(new Uint8Array([1,2]), 'image/png');
+  assert(await wot.writeProperty('lamp','power',input) === true, 'binary write');
+  assert(wot.isBinaryPayload(await wot.invokeAction('lamp','media',input)), 'binary action');
+  for(const operation of ['observeProperty','subscribeEvent']) {
+    let received;
+    const event = new Promise(resolve=>{received=resolve});
+    const handle = await wot[operation]('lamp', 'power', value=>received(value));
+    assert(wot.isBinaryPayload(await event), operation+' binary event');
+    await wot.unsubscribe(handle);
+  }
+  output.textContent += '\nALL PANEL CHECKS PASSED';
+})().catch(error => { document.querySelector('#checks').textContent += '\nFAIL '+error.stack; });
+</script>

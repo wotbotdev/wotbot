@@ -1,0 +1,29 @@
+<!doctype html><title>WoTBot bridge acceptance host</title>
+<h1>WoTBot bridge acceptance host</h1>
+<pre id="log" aria-live="polite">Connecting…</pre>
+<iframe id="panel" title="Generated WoTBot panel" sandbox="allow-scripts" style="width:100%;height:500px;border:1px solid #999"></iframe>
+<script>
+const frame = document.querySelector('#panel');
+const binary = {kind:'binary',contentType:'image/png',bodyBase64:'AQI=',sizeBytes:2};
+window.addEventListener('message', event => {
+  if (event.source !== frame.contentWindow || event.data?.source !== 'wot-bridge') return;
+  const request = event.data;
+  document.querySelector('#log').textContent += '\n'+request.op;
+  const reply = {source:'wot-bridge-host', id:request.id, ok:true};
+  if (request.op === 'readProperty') reply.result = binary;
+  else if (request.op === 'writeProperty') {
+    if (request.value?.bodyBase64 !== 'AQI=') throw Error('Binary write was lost');
+    reply.result = true;
+  } else if (request.op === 'invokeAction') {
+    if (request.input?.bodyBase64 !== 'AQI=') throw Error('Binary action was lost');
+    reply.result = binary;
+  } else if (request.op === 'observeProperty' || request.op === 'subscribeEvent') {
+    reply.result = {subscriptionId:request.op};
+    setTimeout(() => frame.contentWindow.postMessage({source:'wot-bridge-host',
+      kind:'event',subscriptionId:request.op,value:binary}, '*'), 100);
+  } else if (request.op === 'unsubscribe') reply.result = {ok:true};
+  else { reply.ok = false; reply.error = 'Unexpected operation'; }
+  frame.contentWindow.postMessage(reply, '*');
+});
+frame.src = '/normal-panel';
+</script>

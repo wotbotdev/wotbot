@@ -55,7 +55,12 @@ def worker_loop(
             response, promoted_child = outcome
             conn.send(response)
             if promoted_child:
-                return
+                # The successful fork now owns the live session, including
+                # inherited resources and their atexit hooks. A normal return
+                # from a spawned worker would run those hooks in this retired
+                # parent and delete resources (e.g. Matplotlib's cache) that
+                # the promoted child still needs.
+                os._exit(0)
 
         except EOFError:
             break
