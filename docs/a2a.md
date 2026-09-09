@@ -25,21 +25,14 @@ A2A_MAX_ARTIFACT_BYTES=26214400
 The public backend origin must be reachable by calling agents. The UI origin
 supplies panel links. Put the normal HTTPS reverse proxy in front of
 the API, preserving streaming responses. Startup applies the additive migration
-`0008_add_a2a` and `0009_a2a_identity`; they preserve existing conversations, panel versions, interactive
+`0008_agent_execution`; it preserves existing conversations, panel versions, interactive
 jobs, and virtual Thing ownership. Disabling the flag removes the new routes
 without deleting saved data.
 
-`0009_a2a_identity` upgrades both historical versions of `0008`: the original
-context/file tables and the later thread/executor layout. It preserves public
-context IDs, graph thread IDs, paused tasks, retry records, saved panel versions,
-and previously copied downloads. Old copied bytes remain downloadable until
-their original expiry; new exports stay in the executor. Owner-wide message
-uniqueness is enforced by a database primary key. Previously reused IDs across
-multiple tasks are blocked from replay; the existing tasks remain retrievable.
-Apps launched with the original SQL-backed MCP grants must reopen their panel
-tool once after this upgrade. Redis grants from the later layout keep working.
-Downgrading to `0008` is refused while legacy context aliases or copied bytes
-remain, because that version cannot serve them.
+This single migration creates assistant/raw task metadata, retry identities,
+artifact records, and raw subscription leases. Retry identities are unique per
+API key and task family. See the [migration guide](../apps/wotbot/README.md#persistence-and-migrations)
+for adopting the consolidated revision on an existing feature-branch database.
 
 For the local Docker development stack, port 8123 is published on loopback and
 the public backend URL defaults to `http://localhost:8123`. Point an inspector
@@ -346,4 +339,7 @@ endpoints, are retired; migrate clients to the endpoints above.
 
 ## MCP execution profiles
 
-See [MCP toolsets](./mcp.md) for `/mcp/assistant`, `/mcp/intents`, and `/mcp/raw`. A2A and the assistant/intent profiles can continue the same context owned by one API key. Raw contexts are separate. Migration `0010_mcp_toolsets` adds execution metadata and raw contexts while retaining existing IDs, stored data, and download links.
+See [MCP toolsets](./mcp.md) for `/mcp/assistant`, `/mcp/intents`, and `/mcp/raw`.
+A2A and the assistant/intent profiles can continue the same context owned by one
+API key. Raw contexts are separate. Both transports use the schema created by
+`0008_agent_execution`.

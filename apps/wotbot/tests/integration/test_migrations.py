@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from datetime import timedelta
 from importlib.resources import files
+from uuid import uuid4
 
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import IntegrityError
 
+from wotbot.agent_api.models import AgentArtifactRecord
+from wotbot.agent_api.store import TaskStore
+from wotbot.agent_api.types import TaskState
 from wotbot.catalog.service import ThingCatalogWriteService
-from wotbot.core.database import get_session_factory, get_sqlalchemy_engine
+from wotbot.core.database import get_session_factory, get_sqlalchemy_engine, init_db
+from wotbot.core.time import utc_now
 from wotbot.discovery.source_models import SourceRecord
 from wotbot.discovery.source_store import (
     count_source_dependents,
@@ -21,6 +28,15 @@ from wotbot.discovery.source_store import (
 )
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def clear_agent_artifacts(jobs_integration_environment):
+    # Task provenance is a soft reference, so the shared fixture's thread
+    # truncation does not remove artifacts left by other integration modules.
+    with get_session_factory()() as session:
+        session.execute(text("TRUNCATE a2a_artifacts"))
+        session.commit()
 
 
 def _alembic_config() -> Config:
@@ -53,6 +69,75 @@ def _resource_td(thing_id: str = "urn:test:resource") -> dict:
 
 
 def test_alembic_metadata_has_no_pending_schema_drift(jobs_integration_environment) -> None:
+    command.check(_alembic_config())
+
+
+def test_agent_execution_is_one_revision_after_discovery() -> None:
+    script = ScriptDirectory.from_config(_alembic_config())
+    assert script.get_heads() == ["0008_agent_execution"]
+    revisions = list(script.iterate_revisions("head", "0007_add_thing_origin"))
+    assert [revision.revision for revision in revisions] == ["0008_agent_execution"]
+
+
+def _agent_request(family):
+    request = {"message": {"messageId": "shared-id", "parts": [{"text": "Hello"}]}}
+    if family == "raw":
+        request["operation"] = {"kind": "raw", "name": "get_current_time", "arguments": {}}
+    return request
+
+
+def test_branch_head_can_be_restamped_without_changing_retained_agent_data() -> None:
+    config = _alembic_config()
+    store = TaskStore()
+    owner = str(uuid4())
+    tasks = {
+        family: store.admit(owner, _agent_request(family)).task for family in ("assistant", "raw")
+    }
+    artifact_id = str(uuid4())
+    with get_session_factory()() as session:
+        session.add(
+            AgentArtifactRecord(
+                id=artifact_id,
+                task_id=tasks["assistant"].id,
+                owner=owner,
+                name="Retained export",
+                media_type="image/png",
+                artifact_metadata={"kind": "image"},
+                legacy_content=b"retained bytes",
+                created_at=utc_now(),
+                expires_at=utc_now() + timedelta(days=1),
+            )
+        )
+        session.execute(
+            text("UPDATE alembic_version SET version_num = '0011_agent_message_family'")
+        )
+        session.commit()
+    # --purge permits adopting the squashed revision even though the old
+    # feature-branch revision is no longer present in the migration graph.
+    command.stamp(config, "0008_agent_execution", purge=True)
+    init_db()
+    init_db()
+    command.check(config)
+    for family, task in tasks.items():
+        assert store.get(owner, task.id, family) == task
+        replay = store.admit(owner, _agent_request(family))
+        assert not replay.execute and replay.task == task
+    with get_session_factory()() as session:
+        assert session.get(AgentArtifactRecord, artifact_id).legacy_content == b"retained bytes"
+
+
+@pytest.mark.parametrize("family", ["assistant", "raw"])
+def test_agent_downgrade_preserves_retained_tasks(family) -> None:
+    store = TaskStore()
+    owner = str(uuid4())
+    admitted = store.admit(owner, _agent_request(family))
+    # Completed results and their retry identities still require this schema.
+    admitted.task.status.state = TaskState.TASK_STATE_COMPLETED
+    store.save(owner, admitted.task)
+    with pytest.raises(RuntimeError, match="agent execution records remain"):
+        command.downgrade(_alembic_config(), "0007_add_thing_origin")
+    assert store.get(owner, admitted.task.id, family) == admitted.task
+    assert not store.admit(owner, _agent_request(family)).execute
     command.check(_alembic_config())
 
 
@@ -250,15 +335,31 @@ def test_a2a_migration_preserves_existing_chat_panels_jobs_and_virtual_ownership
             )
         )
         session.commit()
+    # The feature migration must preserve unrelated data in both directions,
+    # and remain safe to apply again after a clean downgrade.
+    for _ in range(2):
+        command.upgrade(config, "head")
+        command.check(config)
+        preserved = store.get(chat_id)
+        assert preserved["title"] == "My conversation" and preserved["kind"] == "chat"
+        with get_session_factory()() as session:
+            service = PanelService(session)
+            assert service.list_versions(panel["id"]) == versions
+            assert service.get_panel(panel["id"], include_html=True)["html"] == "<p>Edited</p>"
+            assert session.get(JobRecord, "preserved-job").waiting_question == "Proceed?"
+            assert session.get(JobRecord, "preserved-job").interaction_mode == "required_checkin"
+            assert session.get(JobRunRecord, "preserved-run").status == "waiting_for_input"
+            assert session.get(VirtualThing, "preserved-virtual").owner_thread_id == chat_id
+            assert session.get(VirtualThing, "preserved-virtual").shared_state == {"value": 42}
+        command.downgrade(config, "0007_add_thing_origin")
+        inspector = inspect(get_sqlalchemy_engine())
+        assert not {
+            "a2a_tasks",
+            "a2a_messages",
+            "a2a_artifacts",
+            "agent_subscriptions",
+        }.intersection(inspector.get_table_names())
+        assert not {"owner_api_key_id", "legacy_a2a_context_id"}.intersection(
+            column["name"] for column in inspector.get_columns("threads")
+        )
     command.upgrade(config, "head")
-    preserved = store.get(chat_id)
-    assert preserved["title"] == "My conversation" and preserved["kind"] == "chat"
-    with get_session_factory()() as session:
-        service = PanelService(session)
-        assert service.list_versions(panel["id"]) == versions
-        assert service.get_panel(panel["id"], include_html=True)["html"] == "<p>Edited</p>"
-        assert session.get(JobRecord, "preserved-job").waiting_question == "Proceed?"
-        assert session.get(JobRecord, "preserved-job").interaction_mode == "required_checkin"
-        assert session.get(JobRunRecord, "preserved-run").status == "waiting_for_input"
-        assert session.get(VirtualThing, "preserved-virtual").owner_thread_id == chat_id
-        assert session.get(VirtualThing, "preserved-virtual").shared_state == {"value": 42}

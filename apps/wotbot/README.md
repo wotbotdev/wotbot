@@ -74,8 +74,8 @@ refreshes them. Canonical download URLs still require the owning API key.
 
 The shared execution lifecycle lives in `core/agent_runs.py`. Chat retains its
 SSE adapter in `threads/runs.py`; A2A consumes typed events directly. Durable A2A
-records live in `a2a/models.py`, with migrations `0008_add_a2a` and
-`0009_a2a_identity` (compatible with both earlier `0008` layouts). Generated
+records live in `agent_api/models.py`. The single `0008_agent_execution`
+migration creates the shared A2A/MCP schema after `0007_add_thing_origin`. Generated
 panels use the existing panel service and immutable initial panel versions.
 
 See the [connection and rollout guide](../../docs/a2a.md) for examples, ownership,
@@ -87,6 +87,21 @@ pauses, artifact formats, and retention. The experimental
 The application schema is owned by Alembic migrations in [`src/wotbot/migrations`](./src/wotbot/migrations). They ship inside the `wotbot` package so `alembic upgrade head` resolves them in every install mode. App startup calls `alembic upgrade head`, so API, worker, LiveKit, and indexer processes share the same schema path.
 
 Migration versions intentionally skip `0002`; the dropped revision was superseded before release, and the remaining chain starts at `0001` then continues with `0003`.
+
+The unreleased A2A/MCP revisions `0008`–`0011` were consolidated into
+`0008_agent_execution`. Its schema matches the former `0011_agent_message_family`
+head. For a development database already at that head, stop application processes
+and adopt the new revision from `apps/wotbot` without changing stored data:
+
+```bash
+python -m alembic -c src/wotbot/alembic.ini stamp --purge 0008_agent_execution
+python -m alembic -c src/wotbot/alembic.ini check
+```
+
+Databases on earlier intermediate feature revisions must first reach
+`0011_agent_message_family` using the pre-squash checkout. Databases at `0007` or
+earlier use the normal upgrade command. Downgrading the feature migration is
+refused while agent contexts, tasks, artifacts, or subscriptions remain.
 
 Run migrations manually from `apps/wotbot` when needed (the config lives in the package, so pass it with `-c`):
 
