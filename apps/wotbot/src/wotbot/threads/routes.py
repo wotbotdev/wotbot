@@ -38,7 +38,7 @@ async def _reject_a2a_thread(thread_id: str) -> None:
     another API key's conversation.
     """
     record = await asyncio.to_thread(get_thread, thread_id)
-    if record is not None and record["kind"] == ThreadKind.A2A.value:
+    if record is not None and record["kind"] in {ThreadKind.A2A.value, ThreadKind.MCP_RAW.value}:
         raise HTTPException(status_code=404, detail="Thread not found")
 
 

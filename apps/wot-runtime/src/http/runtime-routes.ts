@@ -9,7 +9,12 @@ import {
 } from '../runtime/operations.js';
 import { formatError, getRuntimeErrorCode, getRuntimeErrorStatus } from '../services/errors.js';
 import { decodePayloadEnvelope, encodePayloadEnvelope, normalizeBody } from '../services/payloads.js';
-import { ensureEventSubscription, ensurePropertyObservation, removeSubscription } from '../services/subscriptions.js';
+import {
+  ensureEventSubscription,
+  ensurePropertyObservation,
+  removeSubscription,
+  subscriptionStatus,
+} from '../services/subscriptions.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -340,6 +345,7 @@ export function createRuntimeRouter(): Router {
 
       response.json(
         await ensurePropertyObservation({
+          subscriptionNamespace: getStringField(body, 'subscriptionNamespace', 'subscription_namespace'),
           target: buildTarget(thingId, propertyName, 'OPERATION_TYPE_OBSERVE_PROPERTY'),
           uriVariables: buildUriVariables(body),
           formSelector: buildFormSelector(body),
@@ -359,6 +365,7 @@ export function createRuntimeRouter(): Router {
 
       response.json(
         await ensureEventSubscription({
+          subscriptionNamespace: getStringField(body, 'subscriptionNamespace', 'subscription_namespace'),
           target: buildTarget(thingId, eventName, 'OPERATION_TYPE_SUBSCRIBE_EVENT'),
           uriVariables: buildUriVariables(body),
           subscriptionInput: buildPayloadEnvelope(
@@ -376,6 +383,11 @@ export function createRuntimeRouter(): Router {
     } catch (error) {
       sendError(response, error);
     }
+  });
+
+  router.post('/subscription-status', (request, response) => {
+    const body = isPlainObject(request.body) ? request.body : {};
+    response.json(subscriptionStatus(getStringField(body, 'subscriptionId', 'subscription_id')));
   });
 
   router.post('/remove-subscription', async (request, response) => {

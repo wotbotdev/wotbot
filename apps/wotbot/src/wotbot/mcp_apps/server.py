@@ -37,8 +37,8 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from wotbot.a2a.artifacts import ArtifactStore
-from wotbot.a2a.constants import MCP_APP_MIME_TYPE
+from wotbot.agent_api.artifacts import ArtifactStore
+from wotbot.agent_api.constants import MCP_APP_MIME_TYPE
 from wotbot.auth.models import User
 from wotbot.auth.providers import get_api_key_user_from_token
 from wotbot.core.settings import Settings
@@ -89,13 +89,22 @@ class ApiKeyTokenVerifier(TokenVerifier):
 
 
 class MCPPanelRuntime:
-    def __init__(self, *, settings=None, artifact_store=None, grant_store=None, panel_service=None):
+    def __init__(
+        self,
+        *,
+        settings=None,
+        artifact_store=None,
+        grant_store=None,
+        panel_service=None,
+        path="/mcp/apps",
+    ):
+        self.path = path
         self.settings = settings or Settings()
         self.artifact_store = artifact_store or ArtifactStore()
         self.grant_store = grant_store or PanelGrantStore(self.settings.redis_url)
         self.panel_service = panel_service or PanelActionService(self.artifact_store)
         self.server = Server(
-            "wotbot-panels",
+            "wotbot-" + path.rsplit("/", 1)[-1],
             version="1.0.0",
             title="WoTBot Panels",
             instructions="Open a saved generated panel. Panel interactions use panels.call from the app and do not start assistant tasks.",
@@ -137,22 +146,25 @@ class MCPPanelRuntime:
                 "Content-Type",
                 "Mcp-Protocol-Version",
                 "Mcp-Session-Id",
+                "Mcp-Method",
+                "Mcp-Name",
+                "Last-Event-ID",
             ],
             expose_headers=["Mcp-Session-Id"],
         )
-        self.root_endpoint = MCPRootEndpoint(self.asgi_app, path="/mcp/apps")
+        self.root_endpoint = MCPRootEndpoint(self.asgi_app, path=self.path)
 
     def install(self, app):
         # Preflight must reach this app's CORS middleware at the exact URL,
         # rather than receiving a parent-router 405 or a slash redirect.
         app.router.routes.append(
             Route(
-                "/mcp/apps",
+                self.path,
                 self.root_endpoint,
                 methods=["GET", "POST", "DELETE", "OPTIONS"],
             )
         )
-        app.mount("/mcp/apps", self.asgi_app)
+        app.mount(self.path, self.asgi_app)
 
     @asynccontextmanager
     async def lifespan(self):
@@ -244,6 +256,7 @@ class MCPPanelRuntime:
                 "artifactId": artifact_id,
                 "title": artifact.name,
                 **artifact.artifact_metadata.get("descriptor", {}),
+                "mcpServerUrl": self.settings.registry_public_url.rstrip("/") + self.path,
             },
             _meta={
                 PANEL_LAUNCH_META_KEY: {

@@ -10,8 +10,8 @@ from typing import Any
 
 import redis.asyncio as redis
 
-from wotbot.a2a.artifacts import ArtifactStore
-from wotbot.a2a.constants import MCP_APP_MIME_TYPE
+from wotbot.agent_api.artifacts import ArtifactStore
+from wotbot.agent_api.constants import MCP_APP_MIME_TYPE
 from wotbot.auth.models import User
 from wotbot.clients.wot_runtime import WotRuntimeClient
 from wotbot.core.config import get_settings

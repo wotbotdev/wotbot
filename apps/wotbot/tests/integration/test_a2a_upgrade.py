@@ -15,7 +15,7 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from fastapi import FastAPI
-from google.protobuf.json_format import MessageToDict
+from google.protobuf.json_format import MessageToDict, ParseDict
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.types import interrupt
 
@@ -120,6 +120,26 @@ async def test_upgrade_preserves_pauses_contexts_retry_identity_panels_and_downl
             metadata={"expiresAt": (now + timedelta(days=1)).isoformat()},
         )
     )
+    json_artifact_id, plotly_artifact_id = str(uuid4()), str(uuid4())
+    figure = {"data": [{"type": "bar", "y": [1, 2]}], "layout": {}}
+    task.artifacts.extend(
+        [
+            Artifact(
+                artifact_id=json_artifact_id,
+                name="Retained result",
+                parts=[
+                    ParseDict(
+                        {"data": {"kind": "wotbot.tool_result", "result": {"value": 42}}}, Part()
+                    )
+                ],
+            ),
+            Artifact(
+                artifact_id=plotly_artifact_id,
+                name="Retained figure",
+                parts=[ParseDict({"data": {"kind": "wotbot.plotly", "figure": figure}}, Part())],
+            ),
+        ]
+    )
     fingerprint = request_fingerprint(MessageToDict(original), legacy=layout == "original")
     with get_sqlalchemy_engine().begin() as connection:
         thread = dict(
@@ -183,6 +203,18 @@ async def test_upgrade_preserves_pauses_contexts_retry_identity_panels_and_downl
             b"old image" if layout == "original" else "new.png"
         )
         connection.execute(tables["a2a_artifacts"].insert().values(**export))
+        connection.execute(
+            tables["a2a_artifacts"]
+            .insert()
+            .values(
+                **{
+                    **export,
+                    "id": plotly_artifact_id,
+                    "name": "figure.json",
+                    "media_type": "application/vnd.plotly.v1+json",
+                }
+            )
+        )
 
     with get_session_factory()() as session:
         panel_service = PanelService(session)
@@ -229,6 +261,10 @@ async def test_upgrade_preserves_pauses_contexts_retry_identity_panels_and_downl
     command.check(config())
     store = TaskStore()
     assert store.get(owner, task_id) == task
+    json_record = await ArtifactStore().get(json_artifact_id, owner=owner)
+    assert json_record.artifact_metadata["artifact"]["parts"][0]["data"]["result"] == {"value": 42}
+    plotly_record = await ArtifactStore().get(plotly_artifact_id, owner=owner)
+    assert plotly_record.artifact_metadata["figure"] == figure
     assert store.thread_id(owner, task_id) == thread_id
     replay = store.admit(owner, MessageToDict(original))
     assert not replay.execute and replay.task.id == task_id and replay.thread_id == thread_id

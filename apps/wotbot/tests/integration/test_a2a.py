@@ -168,7 +168,7 @@ async def test_sdk_http_binding_skills_and_key_isolation(environment):
             return self
 
         async def ainvoke(self, messages, **kwargs):
-            assert any("external agent over A2A" in str(m.content) for m in messages)
+            assert any("external agent through the agent API" in str(m.content) for m in messages)
             return AIMessage(content=f"{self.intent} completed")
 
     from wotbot.agent.tools import LOCAL_TOOLS
@@ -1046,8 +1046,8 @@ async def test_streaming_http_history_limits_terminal_subscription_and_cursor_pa
             assert all(
                 e.HasField("status_update") or e.HasField("artifact_update") for e in events[1:]
             )
-            assert events[-1].status_update.status.state == TaskState.TASK_STATE_COMPLETED
-            assert events[-1].status_update.status.message.parts[0].text == "Streamed answer"
+            assert (events[-1].task.status if events[-1].HasField("task") else events[-1].status_update.status).state == TaskState.TASK_STATE_COMPLETED
+            assert (events[-1].task.status if events[-1].HasField("task") else events[-1].status_update.status).message.parts[0].text == "Streamed answer"
             task_id = events[0].task.id
             no_history = await http.get(f"/a2a/v1/tasks/{task_id}?historyLength=0")
             assert "history" not in no_history.json()
@@ -1208,14 +1208,14 @@ async def test_disconnect_during_admission_does_not_strand_task(environment, mon
         return {"messages": [AIMessage(content="Completed after disconnect")]}
 
     async with running(graph_for(node)) as runtime:
-        original_admit = runtime.store.admit
+        original_admit = runtime.service.store.admit
 
         def slow_admit(*args):
             entered.set()
             assert release.wait(5)
             return original_admit(*args)
 
-        monkeypatch.setattr(runtime.store, "admit", slow_admit)
+        monkeypatch.setattr(runtime.service.store, "admit", slow_admit)
         app = FastAPI()
         app.state.a2a_runtime = runtime
         install_a2a(app, Settings())

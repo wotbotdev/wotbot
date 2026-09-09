@@ -157,17 +157,31 @@ async def lifespan(app: FastAPI):
 
             try:
                 async with AsyncExitStack() as stack:
-                    if settings.a2a_enabled:
+                    if settings.a2a_enabled or settings.mcp_enabled:
                         from wotbot.a2a.runtime import A2ARuntime
+                        from wotbot.agent_api.runtime import AgentRuntime
+                        from wotbot.agent_api.raw import build_raw_graph
+                        from wotbot.agent_api.subscriptions import RawSubscriptions
 
-                        runtime = A2ARuntime(graph=graph, registry=run_registry, settings=settings)
-                        app.state.a2a_runtime = runtime
+                        subscriptions = RawSubscriptions(settings)
+                        raw_graph = build_raw_graph(checkpointer, subscriptions=subscriptions)
+                        runtime = AgentRuntime(
+                            graph=graph,
+                            raw_graph=raw_graph,
+                            subscriptions=subscriptions,
+                            registry=run_registry,
+                            settings=settings,
+                        )
+                        app.state.agent_runtime = runtime
+                        app.state.a2a_runtime = A2ARuntime(service=runtime)
                         await runtime.start()
                         stack.push_async_callback(runtime.close)
-                        await stack.enter_async_context(mcp_runtime.lifespan())
+                        for mcp_runtime in mcp_runtimes:
+                            await stack.enter_async_context(mcp_runtime.lifespan())
                     yield
             finally:
                 app.state.a2a_runtime = None
+                app.state.agent_runtime = None
                 set_active_job_service(None)
                 await job_service.stop()
                 app.state.checkpointer = None
@@ -229,12 +243,29 @@ app.include_router(
     )
 )
 
-if AgentSettings().a2a_enabled:
+surface_settings = AgentSettings()
+mcp_runtimes = []
+if surface_settings.a2a_enabled or surface_settings.mcp_enabled:
     from wotbot.a2a.server import install_a2a
+    from wotbot.agent_api.http import install_downloads
     from wotbot.mcp_apps.assets import router as mcp_assets_router
     from wotbot.mcp_apps.server import MCPPanelRuntime
 
-    install_a2a(app, AgentSettings())
-    mcp_runtime = MCPPanelRuntime(settings=AgentSettings())
+    install_downloads(app, surface_settings)
+    if surface_settings.a2a_enabled:
+        install_a2a(app, surface_settings)
+    mcp_runtimes.append(MCPPanelRuntime(settings=surface_settings))
+    if surface_settings.mcp_enabled:
+        from wotbot.mcp.server import MCPToolRuntime
+
+        for profile in ("assistant", "intents", "raw"):
+            mcp_runtimes.append(
+                MCPToolRuntime(
+                    profile=profile,
+                    settings=surface_settings,
+                    get_runtime=lambda: getattr(app.state, "agent_runtime", None),
+                )
+            )
     app.include_router(mcp_assets_router)
-    mcp_runtime.install(app)
+    for mcp_runtime in mcp_runtimes:
+        mcp_runtime.install(app)

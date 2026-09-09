@@ -1,7 +1,7 @@
 """Short-lived MCP App launch grants.
 
 The same capability-token shape as artifact download links in
-``wotbot.a2a.downloads``, and held the same way: a hashed key in Redis with a
+``wotbot.agent_api.downloads``, and held the same way: a hashed key in Redis with a
 TTL. Losing one to a Redis restart costs the viewer a reopened panel, which is
 why it does not need the durability the task tables have.
 """

@@ -202,6 +202,7 @@ function buildSubscriptionKey(request: any, operationName: OperationName, extraD
     thingId: String(request?.target?.thingId || '').trim(),
     name: String(request?.target?.affordanceName || '').trim(),
     operationName,
+    namespace: String(request?.subscriptionNamespace || ''),
     uriVariables: decodeUriVariables(request?.uriVariables),
     formSelector: request?.formSelector || null,
     extraData,
@@ -657,4 +658,10 @@ export async function stopAllSubscriptions(): Promise<void> {
       await publishSubscriptionLifecycle(subscription, 'subscription_stopped').catch(() => undefined);
     }),
   );
+}
+
+/** Inspect a handle without creating/restarting its subscription. */
+export function subscriptionStatus(subscriptionId: string): { exists: boolean; status?: string } {
+  const subscription = subscriptionsById.get(subscriptionId);
+  return subscription ? { exists: true, status: subscription.status } : { exists: false };
 }

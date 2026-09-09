@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from wotbot.agent.intents import IntentId
+
 import json
 import logging
 from collections.abc import Sequence
-from typing import Any, Literal, NotRequired, Optional, cast
+from typing import Any, NotRequired, Optional, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -82,9 +84,7 @@ class WotbotState(MessagesState):
 
 
 class IntentClassification(BaseModel):
-    intent: Literal["chat", "control", "analysis", "jobs", "virtual_things", "discovery"] = Field(
-        description="The classified intent"
-    )
+    intent: IntentId = Field(description="The classified intent")
 
 
 def _strip_ui_tool_data(message: BaseMessage) -> BaseMessage:
@@ -396,13 +396,16 @@ async def _with_camera_context(
     config: Optional[RunnableConfig],
     camera_frames_enabled: bool,
 ) -> list[BaseMessage]:
-    if config and config.get("configurable", {}).get("a2a"):
+    if config and (
+        config.get("configurable", {}).get("external_agent")
+        or config.get("configurable", {}).get("a2a")
+    ):
         messages = [
             messages[0],
             SystemMessage(
                 content=(
-                    "This request comes from an external agent over A2A, with no chat UI. "
-                    "Use the normal tools and router. Generated outputs are exported as A2A artifacts; "
+                    "This request comes from an external agent through the agent API, with no chat UI. "
+                    "Use the normal tools and router. Generated outputs are exported as artifacts; "
                     "panels are saved automatically and include a panel link and MCP Apps descriptor. "
                     "Explain results independently of those outputs. Do not refer to a panel above, "
                     "a download button, or invent URLs. Credentials are provisioned through the "
@@ -484,6 +487,9 @@ def make_router_node(llm: ChatOpenAI, max_tokens: int):
     system_message = SystemMessage(content=ROUTER_PROMPT)
 
     async def router(state: WotbotState, config: Optional[RunnableConfig] = None):
+        forced = (config or {}).get("configurable", {}).get("forced_intent")
+        if forced is not None:
+            return {"intent": IntentId(forced).value}
         tail = _make_router_messages(state["messages"], max_tokens)
         router_config = dict(config or {})
         tags = list(router_config.get("tags") or [])

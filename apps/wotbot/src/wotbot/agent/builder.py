@@ -6,6 +6,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from wotbot.agent.intents import INTENTS
 from wotbot.agent.device_interactions import make_device_interaction_summary_node
 from wotbot.agent.nodes import (
     WotbotState,
@@ -266,14 +267,7 @@ def build_graph(
     graph.add_conditional_edges(
         "router",
         lambda state: state.get("intent", "chat"),
-        {
-            "chat": "respond",
-            "control": "control_llm",
-            "analysis": "analysis_llm",
-            "jobs": "jobs_llm",
-            "virtual_things": "virtual_things_llm",
-            "discovery": "discovery_llm",
-        },
+        {intent.id: intent.entry for intent in INTENTS.values()},
     )
 
     graph.add_conditional_edges(

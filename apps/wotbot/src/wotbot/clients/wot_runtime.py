@@ -52,6 +52,9 @@ class WotRuntimeClient:
     async def get_runtime_health(self) -> dict[str, Any]:
         return await self._request("GET", "/health")
 
+    async def subscription_status(self, subscription_id):
+        return await self._request("POST", "/runtime/subscription-status", {"subscription_id": subscription_id})
+
     async def describe_endpoint(self, *, url: str) -> dict[str, Any]:
         return await self._request("POST", "/runtime/describe-endpoint", {"url": url})
 
@@ -134,6 +137,7 @@ class WotRuntimeClient:
         property_name: str,
         uri_variables: dict[str, Any] | None = None,
         form_index: int | None = None,
+        subscription_namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
@@ -143,6 +147,7 @@ class WotRuntimeClient:
                 "property_name": property_name,
                 "uri_variables": uri_variables or {},
                 "form_index": form_index,
+                "subscription_namespace": subscription_namespace,
             },
             timeout=self._subscription_timeout,
         )
@@ -157,6 +162,7 @@ class WotRuntimeClient:
         subscription_input_base64: str | None = None,
         uri_variables: dict[str, Any] | None = None,
         form_index: int | None = None,
+        subscription_namespace: str | None = None,
     ) -> dict[str, Any]:
         return await self._request(
             "POST",
@@ -169,6 +175,7 @@ class WotRuntimeClient:
                 "subscription_input_base64": subscription_input_base64,
                 "uri_variables": uri_variables or {},
                 "form_index": form_index,
+                "subscription_namespace": subscription_namespace,
             },
             timeout=self._subscription_timeout,
         )

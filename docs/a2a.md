@@ -367,3 +367,7 @@ This release accepts text and structured JSON. Binary uploads, outbound A2A
 calls, push notifications, A2UI, and multiple API execution processes are
 outside its scope. The old `/api/a2a` routes, including upload and JSON-RPC
 endpoints, are retired; migrate clients to the endpoints above.
+
+## MCP execution profiles
+
+See [MCP toolsets](./mcp.md) for `/mcp/assistant`, `/mcp/intents`, and `/mcp/raw`. A2A and the assistant/intent profiles can continue the same context owned by one API key. Raw contexts are separate. Migration `0010_mcp_toolsets` adds execution metadata and raw contexts while retaining existing IDs, stored data, and download links.

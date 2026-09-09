@@ -255,6 +255,7 @@ class Settings(BaseSettings):
 
     # Inbound agents and generated MCP Apps share the existing assistant stack.
     a2a_enabled: bool = False
+    mcp_enabled: bool = False
     public_ui_origin: str = "http://localhost:3000"
     mcp_allowed_hosts: str = ""
     mcp_allowed_origins: str = ""

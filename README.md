@@ -144,3 +144,5 @@ check before building images and rejects tag/version drift.
 - [`.env.example`](./.env.example): documented environment template.
 - [`VERSION`](./VERSION): shared stack version used by all service manifests.
 - [`LICENSE`](./LICENSE): project license.
+
+WoTBot also offers [three MCP toolsets](./docs/mcp.md): assistant, intent, and raw tools, selected by connection URL with `MCP_ENABLED=true`.
