@@ -86,9 +86,8 @@ one selected source with `discover_external`, and finally uses
 `onboard_candidate` to create a resource Thing.
 
 Built-in providers cover ToolHive, uData, bounded DCAT catalogs, the EDC v3
-Management API, and direct OpenAPI 3.0/3.1 or Swagger 2.0 documents. A portal
-such as `https://data.public.lu/en/` is detected through
-the generic uData probe; there is no portal-specific handler. ToolHive, EDC,
+Management API, and direct OpenAPI 3.0/3.1 or Swagger 2.0 documents. uData portals
+are detected through a generic API probe. ToolHive, EDC,
 private endpoints, and sources that cannot be detected are registered explicitly
 through the dedicated Sources page or API. Chat-initiated registration always
 opens the same confirmation form before probing or persistence.
@@ -123,13 +122,12 @@ to the metadata fingerprint, supports transitions between generated API actions
 and downloadable assets, and preserves local titles, descriptions, and
 manually added affordances.
 
-The opt-in live smoke exercises the complete Luxembourg lifecycle against the
-public portal and the integration Postgres/Valkey services:
+The opt-in live smoke tests exercise provider registration, discovery, and
+onboarding against public sources and the integration Postgres/Valkey services:
 
 ```bash
-cd apps/wotbot
-RUN_EXTERNAL_DISCOVERY_TESTS=1 .venv/bin/pytest -q \
-  tests/integration/test_external_discovery_live.py
+RUN_EXTERNAL_DISCOVERY_TESTS=1 .venv/bin/python -m pytest -q \
+  -c apps/wotbot/pyproject.toml apps/wotbot/tests/integration/test_provider_smoke_live.py
 ```
 
 

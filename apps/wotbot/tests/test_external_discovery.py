@@ -102,9 +102,9 @@ def source_record(
         id=source_id,
         provider=provider,
         external_id="https://data.example",
-        title="Luxembourg open data",
+        title="Regional open data",
         description="National public data catalog",
-        tags=["Luxembourg", "open data"],
+        tags=["Regional", "open data"],
         config={"url": "https://data.example"},
         network_access="public",
         security_name="source_sc",
@@ -256,7 +256,7 @@ class AgentToolTestCase(unittest.IsolatedAsyncioTestCase):
             "wotbot.agent.tools.external_discovery.DiscoveryService",
             return_value=service,
         ):
-            await sources_search.ainvoke({"query": "Luxembourg"})
+            await sources_search.ainvoke({"query": "Regional"})
             await discover_external.ainvoke(
                 {
                     "source_id": "source-a",
@@ -266,7 +266,7 @@ class AgentToolTestCase(unittest.IsolatedAsyncioTestCase):
                 config=config,
             )
             await onboard_candidate.ainvoke({"candidate_id": "candidate-a"}, config=config)
-        service.search_sources.assert_awaited_once_with(query="Luxembourg", limit=10)
+        service.search_sources.assert_awaited_once_with(query="Regional", limit=10)
         service.discover.assert_awaited_once_with(
             source_id="source-a",
             query="weather",
@@ -361,7 +361,7 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
             patch("wotbot.discovery.service.credential_schemes", return_value={}),
         ):
             result = await service.search_sources(
-                query="find useful Luxembourg weather data", limit=10
+                query="find useful regional weather data", limit=10
             )
         self.assertEqual(result["items"][0]["source_id"], records[0].id)
         self.assertNotIn("config", json.dumps(result["items"]))
@@ -370,9 +370,9 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_source_search_never_hides_the_registry_on_a_vocabulary_miss(self) -> None:
         """A source is named by scraped metadata, which rarely matches the ask.
 
-        The Luxembourg portal registers as "Home - Portail Open Data", so a
-        query naming Luxembourg scores zero against it. Filtering those out
-        returned an empty list and stranded the request with nothing to search.
+        A portal registered as "Home - Open Data Portal" scores zero against
+        a query naming a region. Filtering out such sources returned an empty
+        list and stranded the request with nothing to search.
         """
         service = DiscoveryService(Settings())
         records = [
@@ -380,7 +380,7 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
                 id="source-a",
                 provider="udata",
                 external_id="https://data.example",
-                title="Home - Portail Open Data",
+                title="Home - Open Data Portal",
                 description="",
                 tags=[],
                 config={"url": "https://data.example"},
@@ -394,7 +394,7 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
             patch("wotbot.discovery.service.get_session_factory", return_value=MagicMock()),
             patch("wotbot.discovery.service.credential_schemes", return_value={}),
         ):
-            result = await service.search_sources(query="Luxembourg", limit=10)
+            result = await service.search_sources(query="Regional", limit=10)
 
         self.assertEqual([item["source_id"] for item in result["items"]], ["source-a"])
 
@@ -1069,15 +1069,15 @@ class ProviderTestCase(unittest.IsolatedAsyncioTestCase):
         source = SourceDefinition(
             id="source-a",
             provider="udata",
-            title="Luxembourg open data",
-            tags=("Luxembourg",),
+            title="Regional open data",
+            tags=("Regional",),
         )
         intent = prepare_search_intent(
-            "MeteoLux weather observations and forecasts Luxembourg temperature precipitation",
+            "WeatherService weather observations and forecasts Regional temperature precipitation",
             source,
         )
-        self.assertNotIn("Luxembourg", intent.terms)
-        self.assertIn("MeteoLux", intent.terms)
+        self.assertNotIn("Regional", intent.terms)
+        self.assertIn("WeatherService", intent.terms)
 
 
 class DownloadRouteTestCase(unittest.IsolatedAsyncioTestCase):

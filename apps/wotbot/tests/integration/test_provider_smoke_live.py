@@ -70,7 +70,7 @@ CASES = [
     ),
     Case(
         provider="udata",
-        url="https://data.public.lu/en/",
+        url="https://www.data.gouv.fr/",
         queries=("GTFS", "transport", "mobility", ""),
         expect_download_actions=True,
     ),

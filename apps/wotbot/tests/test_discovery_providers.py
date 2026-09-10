@@ -567,9 +567,11 @@ class UdataParsingTestCase(unittest.TestCase):
 
     def test_intent_is_compiled_into_bounded_full_text_probes(self) -> None:
         source = udata_source()
-        queries = udata_queries(prepare_search_intent("MeteoLux weather observations", source))
+        queries = udata_queries(
+            prepare_search_intent("WeatherService weather observations", source)
+        )
         self.assertLessEqual(len(queries), 3)
-        self.assertTrue(any("MeteoLux" in query for query in queries))
+        self.assertTrue(any("WeatherService" in query for query in queries))
 
     def test_an_empty_intent_browses_rather_than_searching(self) -> None:
         self.assertEqual(udata_queries(SearchIntent(original="")), ("",))
@@ -670,7 +672,7 @@ class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_a_dataset_that_only_points_at_a_service_suggests_registering_it(
         self,
     ) -> None:
-        """The MeteoLux shape: an API entry with nothing downloadable in it.
+        """An API entry with nothing downloadable in it.
 
         Such a dataset used to onboard as a Thing with no affordances at all.
         It still has none, because the dataset genuinely holds no data, but it
@@ -904,7 +906,7 @@ class PublicDetectionTestCase(unittest.IsolatedAsyncioTestCase):
         spec = json.dumps(
             {
                 "openapi": "3.1.0",
-                "info": {"title": "MeteoLux API backend", "version": "1"},
+                "info": {"title": "Weather API backend", "version": "1"},
                 "servers": [{"url": "/api/v1"}],
                 "paths": {"/hvd": {"get": {"operationId": "readHvd", "responses": {}}}},
             }
@@ -920,7 +922,7 @@ class PublicDetectionTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(supported)
         assert source is not None
         self.assertEqual(source.provider, "openapi")
-        self.assertEqual(source.title, "MeteoLux API backend")
+        self.assertEqual(source.title, "Weather API backend")
         self.assertEqual(source.external_id, spec_url)
         self.assertEqual(source.config["url"], spec_url)
         validate_server.assert_awaited_once_with(base)

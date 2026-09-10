@@ -43,10 +43,6 @@
   expect: udata
   note: The reference uData deployment.
 
-- url: https://data.public.lu/en/
-  expect: udata
-  note: Already covered by the opt-in live test; keep as the known-good anchor.
-
 - url: https://transport.data.gouv.fr/
   expect: udata
   note: >

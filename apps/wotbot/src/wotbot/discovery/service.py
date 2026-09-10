@@ -115,11 +115,9 @@ class DiscoveryService:
             ranked.sort(key=lambda item: (-item[0], item[1]))
             matched = [record for score, _index, record in ranked if score > 0]
             # Fall back to the ranked registry when nothing matches lexically.
-            # A source is named by whatever metadata detection scraped from its
-            # homepage, which often omits the word a user would reach for --
-            # the Luxembourg portal registers as "Home - Portail Open Data" --
-            # so hard-filtering hid the whole registry behind a vocabulary
-            # mismatch and stranded the request with nothing to search.
+            # A source's scraped homepage metadata may omit the region or topic
+            # a user searches for. Filtering out every source on a vocabulary
+            # mismatch would leave a registered source unavailable to search.
             selected = (matched or [record for _score, _index, record in ranked])[:bounded_limit]
         return {
             "query": normalized_query,

@@ -140,10 +140,9 @@ def service_suggestions(descriptors: list[dict[str, Any]]) -> tuple[dict[str, st
     """Service endpoints from this dataset worth registering as their own source.
 
     uData types a resource ``api`` for any service endpoint, so the type says
-    where a service is, not what it speaks: across data.public.lu it covers WMS
-    capabilities and pygeoapi collections far more often than an OpenAPI
-    document. Which of them is actually supported is source detection's
-    question, because only probing the URL answers it. A dataset just reports
+    where a service is, not what it speaks. It may refer to WMS capabilities,
+    pygeoapi collections, or an OpenAPI document. Source detection determines
+    support by probing the URL. A dataset just reports
     that a service exists, and documentation pages are included because a docs
     page is often what names the specification behind the endpoint.
     """

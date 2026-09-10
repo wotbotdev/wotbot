@@ -61,11 +61,11 @@ test('source APIs use the dedicated registry routes', async () => {
   }) as typeof fetch;
 
   try {
-    await fetchSources(1, 12, 'Luxembourg');
+    await fetchSources(1, 12, 'weather');
     await registerDetectedSource('http://localhost:8080', 'private');
     assert.equal(
       calls[0]?.input,
-      '/api/discovery/sources?page=1&per_page=12&q=Luxembourg',
+      '/api/discovery/sources?page=1&per_page=12&q=weather',
     );
     assert.equal(calls[1]?.input, '/api/discovery/sources/detect');
     assert.equal(

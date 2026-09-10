@@ -370,7 +370,7 @@ export function SourceRegistrationDialog({
                       required
                       value={url}
                       onChange={(event) => setUrl(event.target.value)}
-                      placeholder="https://data.public.lu/en/"
+                      placeholder="https://data.example/"
                     />
                   </Field>
                   {networkFields}
