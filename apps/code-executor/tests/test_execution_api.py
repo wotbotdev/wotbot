@@ -1,6 +1,7 @@
 """Exercise the execution contract through HTTP, the pool and real workers."""
 
 import hashlib
+import json
 import os
 import time
 from unittest.mock import patch
@@ -83,6 +84,66 @@ def test_failed_run_keeps_status_actions_and_previous_session_state(
         )
         assert downloaded.content == b"column\r\nvalue\r\n"
         assert hashlib.sha256(downloaded.content).hexdigest() == descriptor["sha256"]
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "fork"), reason="Session rollback requires POSIX fork"
+)
+def test_analysis_record_raw_input_survives_http_and_invalid_record_rolls_back(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MPLCONFIGDIR", str(tmp_path / "matplotlib"))
+    settings = Settings(
+        _env_file=None,
+        artifacts_dir=str(tmp_path / "artifacts"),
+        internal_api_key="test-records",
+        execution_timeout_seconds=20,
+    )
+    with (
+        patch("code_executor.api.app.Settings", return_value=settings),
+        TestClient(app) as client,
+    ):
+
+        def execute(code):
+            response = client.post(
+                "/execute",
+                json={"session_id": "job-analysis:record-test", "code": code},
+                headers={"Authorization": "Bearer test-records"},
+            )
+            assert response.status_code == 200, response.text
+            return response.json()
+
+        result = execute(
+            "import json\n"
+            "data = {'measurement': {'value': '125', 'unit': 'cm'}}\n"
+            "metres = float(data['measurement']['value']) / 100\n"
+            "store_record({'metres': metres}, raw_input=data)\n"
+            "report('Converted 125 centimetres to 1.25 metres')\n"
+            "print(json.dumps({'answer': {'metres': metres}}))"
+        )
+        assert result["ok"] is True
+        assert result["error"] is None
+        assert json.loads(result["stdout"]) == {"answer": {"metres": 1.25}}
+        assert result["reports"] == ["Converted 125 centimetres to 1.25 metres"]
+        assert len(result["records"]) == 1
+        assert result["records"][0]["data"] == {"metres": 1.25}
+        assert json.loads(result["records"][0]["raw_input"]) == {
+            "measurement": {"value": "125", "unit": "cm"}
+        }
+
+        failed = execute(
+            "metres = 2\n"
+            "store_record({'metres': metres})\n"
+            "report('partial')\n"
+            "store_record({'metres': metres}, confidence='high')"
+        )
+        assert failed["ok"] is False
+        assert "store_record confidence" in failed["error"]
+        assert failed["records"] == []
+        assert failed["reports"] == []
+        after = execute("print(metres)")
+        assert after["ok"] is True
+        assert after["stdout"].strip() == "1.25"
 
 
 @pytest.mark.parametrize(

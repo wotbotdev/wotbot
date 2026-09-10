@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import io
+import json
 import os
 import sys
 import traceback
@@ -12,8 +13,11 @@ import uuid
 from contextlib import redirect_stdout
 from typing import Any
 
+from pydantic import ValidationError
+
 from code_executor.constants import MAX_STDOUT_CHARS, SENSITIVE_ENV_VARS
 from code_executor.file_artifacts import FileArtifacts
+from code_executor.models.schemas import StoredRecord
 from code_executor.models.settings import Settings
 from code_executor.wot_client import SandboxWotClient
 
@@ -258,24 +262,32 @@ class ExecutionEnvironment:
         self,
         data: Any,
         *,
-        raw_input: str | None = None,
+        raw_input: Any = None,
         confidence: float | None = None,
     ) -> None:
         """Queue one structured record for a structured-record analysis job.
 
         The record is only validated against the job's schema and persisted by
         wotbot after the run succeeds (mirroring image/plotly artifacts, which
-        are discarded on failure). The sandbox merely collects the raw payload.
+        are discarded on failure). raw_input may be text or a JSON-serializable
+        value; non-text values are stored as JSON text. Validate the transport
+        payload here so invalid records fail inside execution, before the worker
+        commits its state or the HTTP response is built.
         """
         if not isinstance(data, dict):
             raise TypeError(f"store_record expects a dict for data. Got {type(data)}")
-        self.records.append(
-            {
-                "data": data,
-                "raw_input": raw_input,
-                "confidence": confidence,
-            }
-        )
+        if raw_input is not None and not isinstance(raw_input, str):
+            raw_input = json.dumps(raw_input, allow_nan=False)
+        try:
+            record = StoredRecord(
+                data=data, raw_input=raw_input, confidence=confidence
+            ).model_dump()
+        except ValidationError as exc:
+            error = exc.errors()[0]
+            raise ValueError(f"store_record {error['loc'][0]}: {error['msg']}") from exc
+        # Reject non-JSON values/non-finite numbers and detach nested containers
+        # so subsequent mutations cannot invalidate the queued record.
+        self.records.append(json.loads(json.dumps(record, allow_nan=False)))
 
     def _capture_matplotlib_figure(self) -> None:
         filename = f"{uuid.uuid4()}.png"

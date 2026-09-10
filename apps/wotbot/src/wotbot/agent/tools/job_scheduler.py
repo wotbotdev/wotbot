@@ -280,8 +280,11 @@ async def create_analysis_job(
 
     record_schema (optional): when given, the job produces a virtual Thing whose
     properties/history come from records the analysis code stores. The code calls
-    store_record(data: dict, raw_input=None, confidence=None) for each record; data
-    must satisfy this JSON Schema. Omit for plain narrative (report/chart) output.
+    store_record(data: dict, raw_input=None, confidence=None) at most once per run;
+    data must satisfy this JSON Schema. raw_input may be text or JSON-serializable
+    source data (stored as JSON text); confidence is a finite number or None.
+    Validate with the real store_record and report helpers in run_code.
+    Omit record_schema for plain narrative (report/chart) output.
     """
     service = get_active_job_service()
     if service is None:

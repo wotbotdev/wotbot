@@ -62,6 +62,15 @@ Workers preload common analysis tools:
 
 Installed packages are defined in [`pyproject.toml`](./pyproject.toml).
 
+Analysis jobs can call `report("...")` for a summary and
+`store_record(data, raw_input=None, confidence=None)` at most once per run to
+produce a structured record. `data` must be a JSON-serializable dictionary matching
+the job's record schema. `raw_input` accepts text or JSON-serializable source data;
+objects, arrays and other non-text values are serialized as JSON text for storage.
+`confidence` is an optional finite number. Invalid transport values fail during
+execution and discard the run's outputs; wotbot validates the job-specific schema
+and persists the record after successful execution.
+
 ## Artifacts
 
 Artifacts are written under `ARTIFACTS_DIR`, defaulting to `/tmp/code-executor-artifacts`.

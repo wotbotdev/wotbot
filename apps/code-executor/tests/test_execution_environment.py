@@ -1,3 +1,4 @@
+import json
 import shutil
 import tempfile
 import unittest
@@ -42,6 +43,7 @@ class ExecutionEnvironmentOutputTestCase(unittest.TestCase):
             "__builtins__": __builtins__,
             "print": print,
             "report": self.env.report,
+            "store_record": self.env.store_record,
         }
 
     def tearDown(self) -> None:
@@ -51,6 +53,64 @@ class ExecutionEnvironmentOutputTestCase(unittest.TestCase):
         result = self.env.execute_code("result = {'ok': True}\nresult")
 
         self.assertEqual(result["stdout"], "{'ok': True}\n")
+
+    def test_store_record_accepts_text_and_json_raw_input(self) -> None:
+        for raw_input in (
+            None,
+            "125 cm",
+            {"measurement": {"value": "125", "unit": "cm"}},
+            [{"value": "0"}, None],
+            0,
+            1.25,
+            False,
+        ):
+            with self.subTest(raw_input=raw_input):
+                result = self.env.execute_code(
+                    f"store_record({{'metres': 1.25}}, raw_input={raw_input!r}, confidence=0.9)"
+                )
+                wire = ExecuteResponse(**result).model_dump()
+                self.assertTrue(wire["ok"], wire["error"])
+                record = wire["records"][0]
+                self.assertEqual(record["data"], {"metres": 1.25})
+                self.assertEqual(record["confidence"], 0.9)
+                if raw_input is None or isinstance(raw_input, str):
+                    self.assertEqual(record["raw_input"], raw_input)
+                else:
+                    self.assertEqual(json.loads(record["raw_input"]), raw_input)
+
+    def test_invalid_records_fail_inside_execution_and_discard_outputs(self) -> None:
+        for arguments in (
+            "{'metres': 1.25}, raw_input=object()",
+            "{'metres': 1.25}, raw_input={'value': float('nan')}",
+            "{'metres': 1.25}, confidence='high'",
+            "{'metres': 1.25}, confidence=float('inf')",
+            "{'metres': object()}",
+            "{'metres': float('nan')}",
+        ):
+            with self.subTest(arguments=arguments):
+                result = self.env.execute_code(
+                    "store_record({'metres': 0})\n"
+                    "report('partial')\n"
+                    f"store_record({arguments})"
+                )
+                wire = ExecuteResponse(**result).model_dump()
+                self.assertFalse(wire["ok"])
+                self.assertTrue(wire["error"])
+                self.assertEqual(wire["records"], [])
+                self.assertEqual(wire["reports"], [])
+
+    def test_store_record_snapshots_data_before_later_mutation(self) -> None:
+        result = self.env.execute_code(
+            "data = {'measurement': {'value': 125}}\n"
+            "store_record(data, raw_input=data)\n"
+            "data['measurement']['value'] = object()"
+        )
+        wire = ExecuteResponse(**result).model_dump()
+        self.assertTrue(wire["ok"], wire["error"])
+        self.assertEqual(wire["records"][0]["data"], {"measurement": {"value": 125}})
+        self.assertEqual(
+            json.loads(wire["records"][0]["raw_input"]), wire["records"][0]["data"]
+        )
 
     def test_does_not_duplicate_final_expression_when_stdout_exists(self) -> None:
         result = self.env.execute_code("result = {'ok': True}\nprint(result)\nresult")

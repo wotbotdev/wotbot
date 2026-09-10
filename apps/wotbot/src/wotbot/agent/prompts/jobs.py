@@ -93,6 +93,9 @@ external-world facts from memory; if none is registered, say the answer is unsou
    A chart is only captured as a job artifact when fig.show() runs — building a
    fig without fig.show() produces no chart. Convert datetimes to strings first.
 5. Validate the draft with run_code before create_analysis_job.
+   Keep the real store_record and report helpers in validation; never replace them
+   with mocks. If a validation needs sample inputs to avoid device actions, substitute
+   only those inputs and exercise the same transformation and output calls as the job.
 6. Call report("...") with one short, human-readable sentence summarizing the result
    (e.g. report("Line 3 processed 124 units, 4 fewer than yesterday")). This is what
    the user sees in toasts and notifications, so keep it plain language, not raw data.
@@ -100,8 +103,10 @@ external-world facts from memory; if none is registered, say the answer is unsou
    final line — which stays in the run details, not the headline.
 7. To expose computed results as a queryable virtual Thing (latest values + history),
    pass record_schema to create_analysis_job and have analysis_code call
-   store_record(data, raw_input=None, confidence=None) for each record. data must
-   satisfy record_schema; records persist only when the run succeeds. Use this instead
+   store_record(data, raw_input=None, confidence=None) at most once per run. data must
+   satisfy record_schema; raw_input may be text or JSON-serializable source data
+   (stored as JSON text), and confidence must be a finite number or None.
+   Records persist only when the run succeeds. Use this instead
    of create_record_prompt_job when the values come from deterministic computation, not
    from asking the user.
 8. Event-triggered analysis jobs receive:
