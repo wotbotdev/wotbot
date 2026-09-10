@@ -143,8 +143,8 @@ async def create_web_interface(
       wot.unsubscribe(sub)
 
     The bridge resolves readProperty/writeProperty/invokeAction to the decoded
-    WoT value directly, the same shape returned by wot_read_property and
-    run_code's wot.read_property. Do NOT read transport wrapper fields such as
+    WoT value directly, the same shape as run_code's wot.read_property.
+    Do NOT read transport wrapper fields such as
     result, payload, completed_result, or payload.data in panel JavaScript.
     Use value.value, value.unit, or other nested fields only when the inspected
     property/action schema says the decoded Thing value itself has those fields.
@@ -183,8 +183,9 @@ async def create_web_interface(
     error instead of an artifact -- fix it and call this tool again with the
     complete corrected panel.
 
-    The frontend renders the interface below the tool call. Refer to it
-    naturally ("the panel above") and never mention raw filenames.
+    Returns a validated web artifact and its capability allowlist. Describe
+    the panel by its title and purpose; how it is opened depends on the calling
+    interface.
     """
     allowed = _normalize_capabilities(capabilities)
     if not allowed:

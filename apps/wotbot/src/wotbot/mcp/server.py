@@ -27,12 +27,52 @@ from wotbot.agent_api.errors import AgentError
 from wotbot.agent_api.types import Operation, TaskQuery
 from wotbot.clients.code_executor import CodeExecutorClient
 from wotbot.core.cursors import decode_cursor, encode_cursor
+from wotbot.mcp.descriptions import ASSISTANT_RESULT, SERVER_INSTRUCTIONS, raw_tool_description
 from wotbot.mcp.runtime import MCPServerRuntime, request_user, tool_error
 
 PAGE_SIZE = 50
 ID = {"type": "string", "minLength": 1, "maxLength": 200}
-WAIT = {"type": "number", "minimum": 0, "maximum": 30, "default": 25}
-COMMON = {"requestId": ID, "contextId": ID, "waitSeconds": WAIT}
+REQUEST_ID = {
+    **ID,
+    "description": (
+        "Caller-generated ID for this invocation or resume. Use a new ID for new work; "
+        "reuse it only with the original inputs for an identical retry. Do not add a returned "
+        "contextId to a retry that originally omitted it. Distinct from pending[].requestId."
+    ),
+}
+CONTEXT_ID = {**ID, "description": "A contextId previously returned to this API key."}
+TASK_ID = {**ID, "description": "The taskId returned by an execution call or task.list."}
+ARTIFACT_ID = {**ID, "description": "An artifactId from a task's artifacts or artifact.list."}
+CURSOR = {
+    "type": "string",
+    "maxLength": 2048,
+    "description": (
+        "Opaque nextCursor from the previous page of this tool with the same filters and "
+        "profile. Omit for the first page."
+    ),
+}
+WAIT = {
+    "type": "number",
+    "minimum": 0,
+    "maximum": 30,
+    "default": 25,
+    "description": (
+        "Maximum seconds to wait for completion or a pause; 0 returns immediately. "
+        "Reaching this limit leaves work running. Use task.get to wait again."
+    ),
+}
+COMMON = {
+    "requestId": REQUEST_ID,
+    "contextId": {
+        **CONTEXT_ID,
+        "description": (
+            "Omit to start a new conversation, or reuse a returned contextId for follow-up "
+            "work in the same conversation. Raw contexts are separate from assistant/intents. "
+            "A running or paused task must finish or be cancelled before new work in its context."
+        ),
+    },
+    "waitSeconds": WAIT,
+}
 
 
 def schema(properties, required=()):
@@ -47,12 +87,24 @@ def schema(properties, required=()):
 def invocation_schema(arguments=None):
     fields = dict(COMMON)
     if arguments is None:
-        fields.update(message={"type": "string", "minLength": 1}, data={})
+        fields.update(
+            message={
+                "type": "string",
+                "minLength": 1,
+                "description": "Natural-language request for WoTBot. Provide message, data, or both.",
+            },
+            data={
+                "description": "JSON input or context for the request, supplied to the assistant."
+            },
+        )
         result = schema(fields, ["requestId"])
         result["anyOf"] = [{"required": ["message"]}, {"required": ["data"]}]
     else:
         arguments = dict(arguments)
         definitions = arguments.pop("$defs", {})
+        # The original schema repeats the internal tool description, which can
+        # advertise fields hidden from MCP. Capability guidance lives on Tool.
+        arguments["description"] = "Inputs for this tool. Use {} when no inputs are required."
         fields["arguments"] = arguments
         result = schema(fields, ["requestId", "arguments"])
         if definitions:
@@ -65,7 +117,12 @@ def profile_tools(profile):
         tools = [
             Tool(
                 name="ask_wotbot",
-                description="Ask WoTBot to discover, control, analyze, or automate Things. The assistant selects the intent. Reuse contextId to continue; retry the same requestId only with identical input.",
+                description=(
+                    "Delegate a request involving connected devices, APIs or datasets to WoTBot. "
+                    "It selects the capabilities needed to discover, operate, analyze or automate "
+                    "Things, and can create virtual Things and interactive panels. "
+                    + ASSISTANT_RESULT
+                ),
                 input_schema=invocation_schema(),
             )
         ]
@@ -74,7 +131,8 @@ def profile_tools(profile):
             Tool(
                 name="intent." + intent.id,
                 description=intent.description
-                + " Enters this assistant branch; configured handoffs still apply.",
+                + " Starts with this capability; WoTBot may use others needed to finish the request. "
+                + ASSISTANT_RESULT,
                 input_schema=invocation_schema(),
             )
             for intent in INTENTS.values()
@@ -83,7 +141,7 @@ def profile_tools(profile):
         tools = [
             Tool(
                 name=name,
-                description=tool.description,
+                description=raw_tool_description(name, tool),
                 input_schema=invocation_schema(argument_schema(name)),
             )
             for name, tool in public_tools().items()
@@ -93,27 +151,42 @@ def profile_tools(profile):
     utilities = [
         (
             "task.get",
-            "Retrieve a task; optionally wait up to 30 seconds for completion or input.",
-            schema({"taskId": ID, "waitSeconds": {**WAIT, "default": 0}}, ["taskId"]),
+            "Retrieve a task snapshot, optionally waiting for completion or a pause. "
+            "Inspect status, messages, result, artifacts and pending. This does not start new work.",
+            schema({"taskId": TASK_ID, "waitSeconds": {**WAIT, "default": 0}}, ["taskId"]),
         ),
         (
             "task.list",
-            "List this API key's tasks in this execution family.",
-            schema({"contextId": ID, "cursor": {"type": "string", "maxLength": 2048}}),
+            "List this API key's tasks, optionally by context. Assistant/intents include A2A "
+            "tasks; raw lists only raw tasks. Returns tasks, total and nextCursor.",
+            schema({"contextId": CONTEXT_ID, "cursor": CURSOR}),
         ),
         (
             "task.resume",
-            "Resume a paused task after supplying every requested reply. Provision credentials through the credential API, never in these replies.",
+            "Continue an input_required or auth_required task using every entry in pending. "
+            "Generate a new outer requestId for this resume; copy each pending requestId into "
+            "replies and match its responseSchema. Provision credentials through the credential "
+            "API, never in replies. Returns the updated task snapshot.",
             schema(
                 {
-                    "taskId": ID,
-                    "requestId": ID,
+                    "taskId": TASK_ID,
+                    "requestId": REQUEST_ID,
                     "waitSeconds": WAIT,
                     "replies": {
                         "type": "array",
                         "minItems": 1,
+                        "description": "One reply per pending request, with no omissions or duplicates.",
                         "items": schema(
-                            {"requestId": ID, "response": {}}, ["requestId", "response"]
+                            {
+                                "requestId": {
+                                    **ID,
+                                    "description": "Copy pending[].requestId; do not generate this ID.",
+                                },
+                                "response": {
+                                    "description": "JSON value matching that pending request's responseSchema.",
+                                },
+                            },
+                            ["requestId", "response"],
                         ),
                     },
                 },
@@ -122,33 +195,58 @@ def profile_tools(profile):
         ),
         (
             "task.cancel",
-            "Stop a task and finish checkpoint cleanup. Completed device actions are not undone.",
-            schema({"taskId": ID}, ["taskId"]),
+            "Cancel a running or paused task and return its updated snapshot after cleanup. "
+            "Completed actions are not undone. To stop an established raw subscription, "
+            "use wot_remove_subscription on the raw profile.",
+            schema({"taskId": TASK_ID}, ["taskId"]),
         ),
         (
             "artifact.get",
-            "Retrieve an owned artifact with fresh temporary download links.",
-            schema({"artifactId": ID}, ["artifactId"]),
+            "Retrieve this API key's artifact descriptor. Files include fresh temporary download "
+            "links while retained; panels include a panelUrl for the WoTBot UI. Does not regenerate "
+            "expired files. The resourceUri resolves to metadata, not file bytes.",
+            schema({"artifactId": ARTIFACT_ID}, ["artifactId"]),
         ),
         (
             "artifact.list",
-            "List this API key's artifacts, optionally filtered by task or context.",
-            schema(
-                {"taskId": ID, "contextId": ID, "cursor": {"type": "string", "maxLength": 2048}}
-            ),
+            "List this API key's artifact descriptors across profiles, optionally filtered by "
+            "task or context. Returns artifacts and nextCursor; expired entries are marked.",
+            schema({"taskId": TASK_ID, "contextId": CONTEXT_ID, "cursor": CURSOR}),
         ),
     ]
     if profile == "raw":
         utilities.append(
             (
                 "subscription.poll",
-                "Read the next event from an owned raw subscription and renew its one-hour idle lease. Save nextCursor for the following call.",
+                "Read at most one event from an owned raw subscription and renew its one-hour "
+                "idle lease. Use the creation result's cursor for the first poll, then nextCursor "
+                "from each poll. Returns event (null on timeout) and nextCursor. A lost or expired "
+                "subscription must be created again.",
                 schema(
                     {
-                        "contextId": ID,
-                        "subscriptionId": ID,
-                        "cursor": {"type": "string"},
-                        "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 30000},
+                        "contextId": {
+                            **ID,
+                            "description": "The contextId returned by the task that created the subscription.",
+                        },
+                        "subscriptionId": {
+                            **ID,
+                            "description": "The subscriptionId returned in that task's result.subscription.",
+                        },
+                        "cursor": {
+                            "type": "string",
+                            "description": (
+                                "Use result.cursor from subscription creation for the first poll, "
+                                "then the preceding poll's nextCursor, including after a timeout. "
+                                "Omitting it starts at the current stream tail and skips earlier events."
+                            ),
+                        },
+                        "timeoutMs": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 30000,
+                            "default": 25000,
+                            "description": "Maximum milliseconds to wait for the next event.",
+                        },
                     },
                     ["contextId", "subscriptionId"],
                 ),
@@ -169,12 +267,7 @@ class MCPToolRuntime(MCPServerRuntime):
         super().__init__(
             path="/mcp/" + profile,
             title="WoTBot " + profile.capitalize(),
-            instructions=(
-                "Execution calls return a completed result, an input request, or a durable task handle. "
-                "Use task.get to wait again, task.resume for pending replies, and task.cancel to stop. "
-                "Connections do not own task lifetime. Keep requestId unchanged for an identical retry. "
-                "Every context belongs to this API key; raw contexts are separate from assistant conversations."
-            ),
+            instructions=SERVER_INSTRUCTIONS,
             **kwargs,
         )
         self.downloads = ArtifactDownloadLinks(self.settings, artifact_store=self.artifact_store)

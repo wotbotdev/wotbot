@@ -29,13 +29,12 @@ async def run_code(code: str, config: RunnableConfig) -> dict:
     with fig.show() or plt.show(), images with save_image(image), and export files
     with save_artifact(bytes_or_text_or_binary_stream, filename="data.csv",
     mime_type="text/csv"). Serialize tables explicitly, e.g. df.to_csv(index=False).
-    Files publish only after successful execution. Results include file metadata
-    and expiry; the UI provides downloads. Exports expire after seven days by
-    default, charts after one hour; deployment settings can change these limits.
-    Reading does not extend retention. Refer to charts naturally and to exported
-    files by their human-readable filename and the Download button on their card.
-    Never write artifact download/image links, expose internal artifact URIs, or
-    construct download URLs or paths. Never reconstruct file contents in the
+    Files publish only after successful execution. Results include artifact
+    metadata and expiry. Files, charts and images expire after seven days by
+    default; deployment settings can change these limits. Reading does not
+    extend retention. Identify exports by their returned filenames and use the
+    artifact access provided by the calling interface. Never invent download
+    URLs, expose internal artifact URIs, or reconstruct file contents in the
     conversation.
 
     Failed code may have performed earlier device actions. Inspect the returned

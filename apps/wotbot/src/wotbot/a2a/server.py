@@ -33,7 +33,18 @@ logger = logging.getLogger(__name__)
 def build_agent_card(settings) -> AgentCard:
     return AgentCard(
         name="WoTBot",
-        description="Web of Things assistant for discovery, control, analysis, automation and generated panels. Requests are routed automatically.",
+        description=(
+            "Delegate work with connected devices, APIs and datasets to WoTBot: discover and "
+            "onboard resources, operate registered Things, analyze data, create automations "
+            "and virtual Things, or generate panels. Send text or JSON instructions; WoTBot "
+            "selects the capabilities needed for the request. Results arrive as tasks with "
+            "messages and artifacts. Reuse messageId only for identical retries and contextId "
+            "for later requests in the same conversation. Paused tasks describe the input or "
+            "credential setup needed to continue; resume them using taskId and the requested "
+            "reply schemas. Files have temporary download links; retrieve the task again to "
+            "refresh a link while the file is retained. Panels provide a panelUrl that opens "
+            "the WoTBot UI with its existing access controls."
+        ),
         version="1.0.0",
         supported_interfaces=[
             AgentInterface(

@@ -60,7 +60,8 @@ async def discover_external(
 
     Select a returned candidate with onboard_candidate. Candidate IDs expire and
     belong to this conversation; rediscover expired ones. Source failures are
-    not empty results. Credential challenges use the secure UI.
+    not empty results. Credential challenges pause execution until credentials
+    are provisioned through WoTBot credential management.
     """
     service = DiscoveryService(get_settings())
     try:
@@ -79,7 +80,7 @@ async def onboard_candidate(
     candidate_id: str,
     config: RunnableConfig,
 ) -> dict[str, Any]:
-    """Create one durable resource Thing from a current-thread candidate.
+    """Create one durable resource Thing from a candidate in this conversation.
 
     If suggested_sources is returned, the dataset links to services that need
     their own sources. Find an existing source with sources_search or pass a

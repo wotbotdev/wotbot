@@ -13,38 +13,38 @@ _SKILLS = [
     (
         "chat",
         "Conversation",
-        "Answer questions about Things and smart living.",
+        "Explain WoTBot capabilities and answer general questions about connected devices, APIs and datasets.",
         "What can you help me with?",
     ),
     (
         "control",
-        "Device control",
-        "Read and operate registered Things and create control panels.",
+        "Thing control",
+        "Read properties, write values and invoke actions on registered Things, including devices and APIs. Create interactive control panels when requested.",
         "Turn off the living room lights.",
     ),
     (
         "analysis",
         "Analysis",
-        "Analyze Thing data and generate charts, files and dashboards.",
+        "Retrieve and analyze data from registered Things and onboarded datasets. Run Python calculations and produce charts, downloadable files or interactive dashboards.",
         "Analyze yesterday's energy use and create a dashboard.",
     ),
     (
         "jobs",
         "Automation jobs",
-        "Create and manage scheduled or event-driven automations.",
+        "Create, list, run or delete automation jobs using natural-language instructions or Python. Support one-time, recurring and event-triggered runs, including structured record collection.",
         "Schedule the lights to turn off at 11 pm.",
     ),
     (
         "virtual_things",
         "Virtual Things",
-        "Create and manage virtual Things backed by existing capabilities.",
-        "Create a virtual Thing for total home power.",
+        "Create and manage virtual Things with computed properties, Python actions and emitted events. Combine existing Thing capabilities and shared state into a reusable interface.",
+        "Create a virtual Thing that sums the power readings from three meters.",
     ),
     (
         "discovery",
         "Discovery",
-        "Find Things and external sources and inspect their capabilities.",
-        "Find temperature sensors and show their properties.",
+        "Find registered Things and inspect their properties, actions and events. Search registered external catalogs for APIs or datasets, onboard selected results as Things, and request registration of new sources.",
+        "Find a traffic dataset in a registered external catalog and add it as a Thing.",
     ),
 ]
 

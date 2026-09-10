@@ -259,7 +259,7 @@ async def create_analysis_job(
 ) -> dict[str, Any]:
     """Schedule self-contained Python; creation does not run it immediately.
 
-    Include all imports and inputs: chat variables are unavailable. Use
+    Include all imports and inputs: variables from run_code sessions are unavailable. Use
     save_artifact(..., filename="data.csv") for file exports and fig.show() for
     charts. Let exceptions propagate so failed runs are recorded as failures.
 
@@ -273,8 +273,8 @@ async def create_analysis_job(
     - "cron": run on cron_expression, with optional cron_timezone such as "Europe/Berlin"
 
     analysis_code should call report("...") with one plain-language sentence
-    summarizing the result; that headline is what the user sees in toasts and
-    notifications (print output stays in the run details).
+    summarizing the result; that headline is stored as the run summary
+    (print output stays in the run details).
     Event-triggered analysis code can read event_payload for the decoded event,
     event for metadata, and job_trigger/trigger_payload for raw trigger details.
 

@@ -390,7 +390,7 @@ async def wot_read_property(
     uri_variables: dict[str, Any] | None = None,
     form_index: int | None = None,
 ) -> Any:
-    """Read a live WoT property and return the decoded property value directly."""
+    """Read a live WoT property. The tool output is the decoded property value."""
     return _decoded_runtime_value(
         await _runtime_client().read_property(
             thing_id=thing_id,
@@ -411,7 +411,7 @@ async def wot_write_property(
     uri_variables: dict[str, Any] | None = None,
     form_index: int | None = None,
 ) -> Any:
-    """Write a live WoT property and return the decoded response value directly."""
+    """Write a live WoT property. The tool output is the decoded response value."""
     return _decoded_runtime_value(
         await _runtime_client().write_property(
             thing_id=thing_id,
@@ -436,18 +436,18 @@ async def wot_invoke_action(
     form_index: int | None = None,
     idempotency_key: str | None = None,
 ) -> Any:
-    """Invoke a live WoT action and return the decoded response value directly.
+    """Invoke a live WoT action. The tool output is the decoded response value.
 
     IMPORTANT — authorization / bearer tokens: Do NOT pass tokens in the
     ``input`` field. The runtime automatically injects stored credentials
     (bearer tokens, API keys, etc.) from the credential store when it
-    invokes the action. Tokens must be stored in advance via the
-    secure credential UI. Never ask the user to paste a secret into chat.
+    invokes the action. Provision credentials through WoTBot credential
+    management, outside conversation content and tool arguments.
 
-    IMPORTANT — input format: Pass ``input`` as a Python dict/object, NOT
-    as a JSON string. If you pass a JSON string, the runtime will send it
-    as a literal string to the server, which will reject it with a 400
-    error. Always pass structured data as a dict.
+    Inspect the action with wot_get_action first. Pass ``input`` as a JSON
+    value matching its schema; keep objects and arrays structured instead of
+    JSON-encoding them as strings. For binary inputs, use input_base64 with
+    input_content_type.
     """
     # Auto-parse JSON string inputs to dict — the agent sometimes passes
     # a JSON string instead of a proper Python dict, which causes 400 errors.
