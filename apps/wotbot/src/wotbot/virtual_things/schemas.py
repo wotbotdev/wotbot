@@ -338,6 +338,11 @@ def _with_abstract_forms(td: dict[str, Any]) -> dict[str, Any]:
         for name, definition in affordances.items():
             if not isinstance(definition, dict):
                 continue
+            if section == "properties":
+                # Virtual properties only have read handlers. node-wot otherwise
+                # defaults to read/write when it generates the concrete forms.
+                definition["readOnly"] = True
+                definition["writeOnly"] = False
             if isinstance(definition.get("forms"), list) and definition["forms"]:
                 continue
             definition["forms"] = [

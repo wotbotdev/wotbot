@@ -456,7 +456,13 @@ def _bind_runnable(
         else {}
     )
     if active_tools:
-        return llm.bind_tools(active_tools, parallel_tool_calls=parallel_tool_calls, **bind_kwargs)
+        # Tools accept open JSON objects (TD schemas, shared state, action input).
+        # Provider defaults can normalize these into closed strict schemas, making
+        # the model emit {} or null. Keep those objects open on the wire; tool
+        # contracts still validate arguments and reject unknown outer fields.
+        return llm.bind_tools(
+            active_tools, strict=False, parallel_tool_calls=parallel_tool_calls, **bind_kwargs
+        )
     return llm.bind(**bind_kwargs) if bind_kwargs else llm
 
 

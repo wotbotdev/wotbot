@@ -4,9 +4,13 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from jsonschema import Draft202012Validator
+from langchain_core.messages import HumanMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, ValidationError
 
+from wotbot.agent.nodes import _bind_runnable
 from wotbot.agent.tools import LOCAL_TOOLS, REGISTRY_TOOLS
 from wotbot.agent.tools.ask_job_user import ask_job_user
 from wotbot.agent.tools.contracts import tool
@@ -15,6 +19,7 @@ from wotbot.agent.tools.job_scheduler import create_prompt_job, create_record_pr
 from wotbot.agent.tools.route_to import make_route_to_tool
 from wotbot.agent.tools.run_code import run_code
 from wotbot.agent.tools.submit_job_record import submit_job_record
+from wotbot.agent.tools.virtual_things import add_virtual_property, create_virtual_thing
 from wotbot.agent.tools.wot_registry import things_search, things_sparql
 from wotbot.search import set_active_search_service
 
@@ -52,6 +57,41 @@ def test_nested_json_ld_and_schema_extension_fields_survive_validation():
     document = {"@context": "urn:example", "x-custom": {"title": "keep", "@type": "Device"}}
     assert receive.invoke({"document": document}) == document
     assert receive.tool_call_schema["properties"]["document"]["additionalProperties"] is True
+
+
+@pytest.mark.parametrize("responses_api", [False, True])
+def test_model_requests_preserve_open_virtual_schema_and_shared_state(responses_api):
+    # Reproduce the actual provider payload, including LangChain's API conversion.
+    # Omitting strict let the eval provider normalize optional dictionaries into
+    # empty closed objects, so the model could not declare a type or seed state.
+    llm = ChatOpenAI(api_key="unused", model="gpt-4.1", use_responses_api=responses_api)
+    bound = _bind_runnable(
+        llm,
+        [add_virtual_property, create_virtual_thing],
+        parallel_tool_calls=True,
+        reasoning_effort=None,
+    )
+    payload = llm._get_request_payload([HumanMessage(content="create a Thing")], **bound.kwargs)
+    functions = {
+        (function := spec if responses_api else spec["function"])["name"]: function
+        for spec in payload["tools"]
+    }
+    arguments = {
+        "add_virtual_property": {
+            "thing_id": "urn:test",
+            "name": "metres",
+            "handler_code": "def handle(input, state, context): return 1.25",
+            "value_schema": {"type": "number", "unit": "m", "x-example": {"value": 1.25}},
+            "cache_ttl_seconds": 0,
+        },
+        "create_virtual_thing": {"title": "Counter", "shared_state": {"count": 0}},
+    }
+    for name, args in arguments.items():
+        function = functions[name]
+        assert function["strict"] is False
+        validator = Draft202012Validator(function["parameters"])
+        validator.validate(args)
+        assert not validator.is_valid({**args, "unexpected_outer_argument": True})
 
 
 def test_handler_validation_failure_does_not_claim_no_operation_ran():

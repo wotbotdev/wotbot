@@ -343,11 +343,13 @@ class VirtualThingBuilderTestCase(unittest.TestCase):
             affordance_type="property",
             affordance_name="currentScore",
             handler_code="def handle(input, state, context):\n    return 72",
-            td_definition=property_definition({"type": "number", "readOnly": True}),
+            td_definition=property_definition({"type": "number"}),
         )
         self.assertTrue(result["ok"], result)
         td = result["virtual_thing"]["td"]
         self.assertEqual(td["properties"]["currentScore"]["type"], "number")
+        self.assertIs(td["properties"]["currentScore"]["readOnly"], True)
+        self.assertIs(td["properties"]["currentScore"]["writeOnly"], False)
         binding = result["virtual_thing"]["bindings"][0]
         self.assertEqual(binding["affordance_type"], "property")
         self.assertEqual(binding["kind"], "computed")
@@ -627,6 +629,28 @@ class VirtualThingBuilderTestCase(unittest.TestCase):
 
 
 class VirtualThingSchemasTestCase(unittest.TestCase):
+    def test_virtual_properties_normalize_unsupported_write_access(self):
+        for flags in ({}, {"readOnly": False}, {"writeOnly": True}):
+            with self.subTest(flags=flags):
+                property_td = {"type": "number", **flags}
+                request = DefineVirtualThingRequest(
+                    title="Computed Measurement",
+                    td={"properties": {"metres": property_td}},
+                    bindings=[
+                        {
+                            "affordance_type": "property",
+                            "affordance_name": "metres",
+                            "kind": "computed",
+                            "handler_code": "def handle(input, state, context):\n    return 1.25",
+                        }
+                    ],
+                )
+                normalized = request.td["properties"]["metres"]
+                self.assertEqual(normalized["type"], "number")
+                self.assertIs(normalized["readOnly"], True)
+                self.assertIs(normalized["writeOnly"], False)
+                self.assertEqual(property_td, {"type": "number", **flags})
+
     def test_define_request_injects_abstract_forms_and_validates_bindings(self):
         request = DefineVirtualThingRequest(
             title="Comfort Sensor",

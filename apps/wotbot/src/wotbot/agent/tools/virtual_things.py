@@ -70,7 +70,7 @@ async def add_virtual_property(
     value_schema: dict[str, Any] | None = None,
     cache_ttl_seconds: Annotated[int, Field(ge=0)] = 30,
 ) -> dict[str, Any]:
-    """Add or replace a computed property on a virtual Thing.
+    """Add or replace a read-only computed property on a virtual Thing.
 
     handler_code is Python defining `def handle(input, state, context)` that
     returns the computed value. `state` is local to this property; use
@@ -78,7 +78,11 @@ async def add_virtual_property(
     handle with the injected `wot` client (wot.read_property / wot.invoke_action
     / wot.write_property); capability grants are inferred from literal
     thing_id/name strings.
-    value_schema is an optional JSON Schema for the value and may be omitted.
+    value_schema declares the computed value's JSON Schema in the published TD.
+    Provide it whenever the value shape is known or requested: a numeric property
+    needs {"type": "number"}, even if the user does not say "schema". For arrays
+    declare items; for objects declare properties and required fields. Omit only
+    for an unconstrained value. No schema is inferred from Python or smoke tests.
     cache_ttl_seconds caches each read for that many seconds (default 30) to
     avoid re-running the handler and re-hitting real Things on every read. Set it
     to 0 for properties that must recompute every read, e.g. ones returning
@@ -110,8 +114,11 @@ async def add_virtual_action(
     handler_code is Python defining `def handle(input, state, context)` that
     returns the result. `input` is the action input. Mutate
     context["shared_state"] when the action should update Thing-wide state that
-    properties or events can read later. input_schema and output_schema are
-    optional JSON Schemas and may be omitted.
+    properties or events can read later. Declare input_schema and output_schema
+    for known or requested input/output shapes. A numeric action needs both
+    {"type": "number"}; arrays need items and objects need properties/required.
+    Omit a schema only when that value has no contract, e.g. an inputless action.
+    Schemas are not inferred from Python or smoke tests.
     """
     builder = get_virtual_thing_builder()
     return await asyncio.to_thread(
@@ -146,7 +153,10 @@ async def add_virtual_event(
     - interval_seconds=N evaluates the handler every N seconds.
     - source_thing_id + source_event_name re-evaluates on another Thing's event.
     - omit all three to make the event explicit (fire via emit_virtual_thing_event).
-    data_schema is an optional JSON Schema for the payload and may be omitted.
+    data_schema declares the emitted payload, not the emit/payload/state wrapper.
+    Provide it for known or requested payload shapes: numeric event data needs
+    {"type": "number"}. Omit only for an unconstrained payload. No schema is
+    inferred from Python or smoke tests, including tests that suppress emission.
     """
     builder = get_virtual_thing_builder()
     return await asyncio.to_thread(

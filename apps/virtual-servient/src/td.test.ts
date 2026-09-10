@@ -1,7 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { catalogTdWithMetadata, concreteCatalogTd } from "./td.js";
+import {
+  catalogTdWithMetadata,
+  concreteCatalogTd,
+  tdForProduce,
+} from "./td.js";
+
+test("tdForProduce makes legacy virtual properties read-only and preserves schemas", () => {
+  for (const flags of [{}, { readOnly: false }, { writeOnly: true }]) {
+    const property = {
+      type: "number",
+      ...flags,
+      forms: [{ href: "urn:abstract", op: ["readproperty"] }],
+    };
+    const original = structuredClone(property);
+    const action = { input: { type: "number" }, output: { type: "number" } };
+    const event = { data: { type: "number" } };
+    const td = tdForProduce({
+      id: "virtual:things:measurement",
+      title: "Measurement",
+      properties: { metres: property },
+      actions: { add: action },
+      events: { crossed: event },
+    });
+
+    assert.deepEqual(td.properties, {
+      metres: { type: "number", readOnly: true, writeOnly: false },
+    });
+    assert.deepEqual(td.actions, { add: action });
+    assert.deepEqual(td.events, { crossed: event });
+    assert.deepEqual(property, original);
+  }
+});
 
 test("concreteCatalogTd keeps fallback affordances missing from exposed TD", async () => {
   const td = await concreteCatalogTd(

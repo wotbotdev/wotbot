@@ -229,7 +229,13 @@ export function tdForProduce(document: ThingDescription): ThingDescription {
         typeof definition === "object" &&
         !Array.isArray(definition)
       ) {
-        delete (definition as Record<string, unknown>).forms;
+        const affordance = definition as Record<string, unknown>;
+        delete affordance.forms;
+        if (section === "properties") {
+          // Also normalize older stored definitions: only read handlers exist.
+          affordance.readOnly = true;
+          affordance.writeOnly = false;
+        }
       }
     }
   }

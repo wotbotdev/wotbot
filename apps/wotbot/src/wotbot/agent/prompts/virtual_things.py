@@ -21,8 +21,17 @@ URLs; virtual-servient owns concrete forms after activation.
    - add_virtual_action(thing_id, name, handler_code, input_schema?, output_schema?)
    - add_virtual_event(thing_id, name, handler_code, interval_seconds? |
      source_thing_id+source_event_name?, data_schema?)
-   Re-adding the same name replaces that affordance. Schemas are optional; omit
-   them unless the user needs a specific contract. Property reads are cached for
+   Re-adding the same name replaces that affordance. Declare schemas for known
+   value shapes, including types requested in ordinary language: a "numeric
+   property" requires value_schema={"type": "number"}; a numeric action requires
+   input_schema and output_schema with type "number"; numeric event data requires
+   data_schema={"type": "number"}. For arrays, declare items; for objects, declare
+   properties and required fields. Describe the handler's transformed output,
+   not the source payload. Only omit a schema when that value has no known
+   contract (e.g. an action with no input). Returning a number from Python does
+   not declare a numeric TD: schemas are not inferred from handler code or smoke
+   test results. Properties are read-only; use actions to update shared state.
+   Property reads are cached for
    cache_ttl_seconds (default 30); pass cache_ttl_seconds=0 for a property that
    must recompute every read, such as one returning a random value or the current
    time, otherwise the first value is served unchanged until the TTL expires.
@@ -98,7 +107,9 @@ A computed property that combines throughput from two production lines:
         line_a = wot.read_property("urn:factory:line-a", "unitsProduced")
         line_b = wot.read_property("urn:factory:line-b", "unitsProduced")
         return {"lineA": line_a, "lineB": line_b, "total": line_a + line_b}
-    ''')
+    ''', value_schema={"type": "object", "properties": {
+        "lineA": {"type": "number"}, "lineB": {"type": "number"},
+        "total": {"type": "number"}}, "required": ["lineA", "lineB", "total"]})
     activate_virtual_thing(tid)
 
 ## Reusing Prior Analysis
@@ -114,7 +125,8 @@ wot.read_property instead of loading historical series.
    source value shape first") and write the traversal against the value you observe.
 2. create_virtual_thing, then add each affordance, repairing any errors a call
    reports before moving on.
-3. activate_virtual_thing and repair any smoke-test issues.
+3. Check that the returned TD declares each requested value/input/output/data
+   schema, then activate_virtual_thing and repair any smoke-test issues.
 4. For a quick test, use the normal runtime path after activation: read computed
    properties with wot_read_property, invoke computed actions with
    wot_invoke_action, subscribe to emitted events with wot_subscribe_event, and
