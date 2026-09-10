@@ -75,21 +75,6 @@ The application schema is owned by Alembic migrations in [`src/wotbot/migrations
 
 Migration versions intentionally skip `0002`; the dropped revision was superseded before release, and the remaining chain starts at `0001` then continues with `0003`.
 
-The unreleased A2A/MCP revisions `0008`–`0011` were consolidated into
-`0008_agent_execution`. Its schema matches the former `0011_agent_message_family`
-head. For a development database already at that head, stop application processes
-and adopt the new revision from `apps/wotbot` without changing stored data:
-
-```bash
-python -m alembic -c src/wotbot/alembic.ini stamp --purge 0008_agent_execution
-python -m alembic -c src/wotbot/alembic.ini check
-```
-
-Databases on earlier intermediate feature revisions must first reach
-`0011_agent_message_family` using the pre-squash checkout. Databases at `0007` or
-earlier use the normal upgrade command. Downgrading the feature migration is
-refused while agent contexts, tasks, artifacts, or subscriptions remain.
-
 Run migrations manually from `apps/wotbot` when needed (the config lives in the package, so pass it with `-c`):
 
 ```bash

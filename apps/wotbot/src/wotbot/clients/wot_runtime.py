@@ -53,7 +53,9 @@ class WotRuntimeClient:
         return await self._request("GET", "/health")
 
     async def subscription_status(self, subscription_id):
-        return await self._request("POST", "/runtime/subscription-status", {"subscription_id": subscription_id})
+        return await self._request(
+            "POST", "/runtime/subscription-status", {"subscription_id": subscription_id}
+        )
 
     async def describe_endpoint(self, *, url: str) -> dict[str, Any]:
         return await self._request("POST", "/runtime/describe-endpoint", {"url": url})

@@ -157,17 +157,14 @@ def generated_diff(
         else None
     )
     after_digest = (
-        after_generation.get("specificationDigest")
-        if isinstance(after_generation, dict)
-        else None
+        after_generation.get("specificationDigest") if isinstance(after_generation, dict) else None
     )
     return {
         "added_actions": sorted(set(after_generated) - set(before_generated))[:30],
         "removed_actions": sorted(set(before_generated) - set(after_generated))[:30],
         "changed_actions": changed[:30],
         "metadata_changed": (
-            current.get("wotbot:apiDescription")
-            != replacement.get("wotbot:apiDescription")
+            current.get("wotbot:apiDescription") != replacement.get("wotbot:apiDescription")
             or bool(before_digest and after_digest and before_digest != after_digest)
         ),
         "server_changed": (

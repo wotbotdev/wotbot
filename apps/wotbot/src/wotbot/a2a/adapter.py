@@ -43,9 +43,10 @@ def translate(function):
 
 
 def _omit_empty_metadata(value):
+    """Omit empty protocol metadata without walking opaque JSON payloads."""
     if isinstance(value, dict):
         return {
-            key: _omit_empty_metadata(item)
+            key: item if key in {"data", "metadata"} else _omit_empty_metadata(item)
             for key, item in value.items()
             if key != "metadata" or item
         }
