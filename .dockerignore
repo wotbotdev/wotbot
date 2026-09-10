@@ -12,11 +12,6 @@
 **/dist
 logs
 examples/thing-descriptions
-chat-ui
-code-executor
-copilot
-docker
-wot_runtime
 .next
 *.tsbuildinfo
 next-env.d.ts

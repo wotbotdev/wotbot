@@ -11,16 +11,12 @@ node_modules/
 .pytest_cache/
 .playwright-mcp/
 wot_registry.db
+# Local-only scratch space for sample Thing Descriptions; not shipped.
 examples/thing-descriptions
-/chat-ui/
-/code-executor/
-/copilot/
-/docker/
-/wot_runtime/
 .next/
 *.tsbuildinfo
 next-env.d.ts
-data/
-!apps/copilot/src/copilot/catalog/enrichment/data/
-!apps/copilot/src/copilot/catalog/enrichment/data/**
-apps/copilot/src/copilot/catalog/enrichment/data/**/__pycache__/
+# Root-level runtime state (local SQLite databases). Anchored, so packaged
+# data directories such as apps/wotbot/src/wotbot/catalog/enrichment/data
+# stay tracked.
+/data/

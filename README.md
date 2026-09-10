@@ -19,14 +19,50 @@ browser
 - [`apps/code-executor`](./apps/code-executor/README.md): internal Python worker service used by the agent's `run_code` tool.
 - [`apps/wot-runtime`](./apps/wot-runtime/README.md): internal node-wot runtime that reads, writes, invokes, and subscribes against Thing Descriptions.
 - [`apps/virtual-servient`](./apps/virtual-servient/README.md): internal node-wot producer that turns wotbot virtual Thing definitions into concrete catalog Thing Descriptions.
-- [`examples/thing-descriptions`](./examples/thing-descriptions): sample Thing Description assets for local scenarios.
 
 Docker Compose also starts Postgres with pgvector, Valkey, an RDF service, and LiveKit Server.
+
+## Concepts
+
+This stack is built on the [W3C Web of Things](https://www.w3.org/WoT/) standard,
+and its vocabulary is used throughout the code without further explanation.
+
+**From the standard:**
+
+| Term | Meaning |
+| --- | --- |
+| **Thing** | Any addressable device or service — a lamp, a weather API, a dataset. |
+| **Thing Description** (TD) | The JSON-LD document describing one Thing: its metadata, what it can do, and the concrete network calls to do it. The central data structure of this codebase. |
+| **Affordance** | One capability declared by a TD. Three kinds: a **property** (readable/writable state), an **action** (an invocable operation), and an **event** (a subscribable stream). |
+| **Form** | The transport details inside an affordance — URL, method, content type. The part that turns an abstract capability into an actual HTTP call. |
+| **Servient** | A runtime that *consumes* TDs (calling other Things) and/or *produces* them (exposing its own). `wot-runtime` consumes; `virtual-servient` produces. |
+| **node-wot** | The reference JavaScript implementation of the standard. Both Node services are built on it. |
+
+**Specific to WoTBot:**
+
+| Term | Meaning |
+| --- | --- |
+| **Catalog** | The registry of every TD this deployment knows about, owned by `wotbot` and stored in Postgres. |
+| **Virtual Thing** | A Thing WoTBot defines itself rather than discovering — computed properties, custom actions, derived events. Defined in `wotbot`, produced as a real TD by `virtual-servient`, then consumed like any other Thing. |
+| **Record-backed Thing** | A virtual Thing whose properties come from rows a structured-record job has written. |
+| **Source** | An external catalog to search for new Things (a data portal, an MCP registry, a dataspace connector). Stored separately from the Thing catalog; a source is *not* a TD. |
+| **Onboarding** | Turning one search result from a source into a real Thing in the catalog. The search result is a temporary **candidate** until onboarded. |
+| **Panel** | A small web interface the agent generates, saved and served on its own isolated origin. |
+| **Job** | Automation that runs on a schedule or an event trigger, using the same agent graph as chat. |
+| **Intent** | Which branch of the agent graph handles a turn — `chat`, `control`, `analysis`, `jobs`, or `virtual_things`. A router picks one per turn. |
+
+**External protocols referenced in the discovery code:** [A2A](https://a2a-protocol.org/)
+and [MCP](https://modelcontextprotocol.io/) are agent-to-agent and agent-to-tool
+protocols WoTBot both speaks and exposes. [DCAT](https://www.w3.org/TR/vocab-dcat-3/)
+and [uData](https://github.com/opendatateam/udata) are open-data catalog standards.
+[EDC](https://eclipse-edc.github.io/documentation/) is the Eclipse Dataspace
+Connector, where access to a dataset is negotiated against an
+[ODRL](https://www.w3.org/TR/odrl-model/) policy before any transfer.
 
 ## Getting Started
 
 1. Copy [`.env.example`](./.env.example) to `.env`.
-2. Fill the required LLM and shared-secret values.
+2. Set the five values listed under [Required settings](#required-settings).
 3. Start the stack:
 
 ```bash
@@ -34,6 +70,24 @@ docker compose up -d
 ```
 
 4. Open `http://localhost:3000`.
+
+### Required settings
+
+Everything else in `.env.example` has a working Compose default and can stay as
+shipped for local development.
+
+| Variable | Why |
+| --- | --- |
+| `OPENAI_API_KEY` | No default. The agent cannot answer without it. |
+| `WOT_RUNTIME_REGISTRY_TOKEN` | Startup **fails** if empty. Shared secret between `wotbot` and `wot-runtime`. |
+| `WOT_RUNTIME_API_TOKEN` | Startup **fails** if empty. Authenticates calls into `wot-runtime`. |
+| `INTERNAL_API_KEY` | Defaults to empty, which leaves internal service endpoints **unauthenticated**. Set it outside a disposable local setup. |
+| `INIT_ADMIN_TOKEN` | Same. Also the UI's fallback registry token. |
+
+`OPENAI_MODEL` defaults to `gpt-4o`; set it if you use a different model or an
+OpenAI-compatible endpoint. The four shared secrets can be any value you
+choose — they authenticate services in this stack to each other, and are not
+credentials for anything external.
 
 The root Compose files are compatibility wrappers around the canonical stack in [`deploy/compose.yaml`](./deploy/compose.yaml) and its local development override in [`deploy/compose.override.yaml`](./deploy/compose.override.yaml).
 
