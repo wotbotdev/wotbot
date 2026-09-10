@@ -11,7 +11,10 @@ RAW_RESULT = (
 SERVER_INSTRUCTIONS = (
     "Execution tools return task snapshots in structuredContent and as JSON text. "
     "Assistant replies are in messages/statusMessage; raw tool output is in result; "
-    "generated outputs are in artifacts. A successful MCP call does not mean execution "
+    "generated outputs are in artifacts. Image artifacts under 1 MB are also returned "
+    "inline as image content; render those blocks directly and never link an artifact by "
+    "filename, because artifact files are reachable only through their resource link or "
+    "artifact.get. A successful MCP call does not mean execution "
     "has finished: inspect status. For submitted or working, use task.get. For input_required "
     "or auth_required, answer every pending request using task.resume and its responseSchema. "
     "Provision credentials through the WoTBot credential API, never in tool arguments or replies. "

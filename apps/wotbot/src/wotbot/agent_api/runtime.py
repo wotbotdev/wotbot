@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from wotbot.agent.device_interactions import is_device_interaction_summary_message
 from wotbot.agent_api.errors import TaskNotCancelableError, UnsupportedOperationError
 from wotbot.agent_api.interrupts import describe_interrupt
 from wotbot.agent_api.store import ACTIVE, RESERVED, Admission, TaskStore
@@ -38,6 +39,26 @@ logger = logging.getLogger(__name__)
 # Handed to a listener that fell too far behind, instead of ending its
 # stream the same way a finished task does.
 _TRUNCATED = object()
+
+
+def final_reply_text(messages, seen) -> str:
+    """Return the assistant text that ends the run, newest first.
+
+    The graph appends a device-interaction summary after the real answer. Its
+    content is a UI-only marker, so taking the last assistant message verbatim
+    would publish that marker as the reply and drop the answer entirely.
+    """
+    return next(
+        (
+            _message_text(message.content)
+            for message in reversed(messages)
+            if isinstance(message, AIMessage)
+            and not message.tool_calls
+            and message.id not in seen
+            and not is_device_interaction_summary_message(message)
+        ),
+        "",
+    )
 
 
 def agent_message(task: Task, text: str, data: dict | None = None) -> Message:
@@ -304,15 +325,7 @@ class AgentRuntime:
                     pending=pending,
                 )
             else:
-                messages = (snapshot.values or {}).get("messages", [])
-                reply = next(
-                    (
-                        _message_text(m.content)
-                        for m in reversed(messages)
-                        if isinstance(m, AIMessage) and not m.tool_calls and m.id not in seen
-                    ),
-                    "",
-                )
+                reply = final_reply_text((snapshot.values or {}).get("messages", []), seen)
                 output = agent_message(task, reply) if reply else None
                 if output is not None:
                     task.history.append(output)
