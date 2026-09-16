@@ -3,15 +3,15 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.embeddings import Embeddings
 
-from wotbot.thing_indexer.prompting import (
-    PROMPT_TEMPLATE,
-    SUMMARY_PROMPT_VERSION,
-    _extract_message_text,
-)
 from wotbot.search.vector_store import (
     SearchIndexDocument,
     SearchIndexMatch,
     SearchVectorStore,
+)
+from wotbot.thing_indexer.prompting import (
+    PROMPT_TEMPLATE,
+    SUMMARY_PROMPT_VERSION,
+    _extract_message_text,
 )
 
 

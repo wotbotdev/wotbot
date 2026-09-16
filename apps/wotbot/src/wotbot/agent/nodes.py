@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from wotbot.agent.intents import IntentId
-
 import json
 import logging
 from collections.abc import Sequence
@@ -28,6 +26,7 @@ from wotbot.agent.camera_context import attach_latest_camera_frame
 from wotbot.agent.device_interactions import (
     without_device_interaction_summary_messages,
 )
+from wotbot.agent.intents import IntentId
 from wotbot.agent.prompts import (
     ANALYSIS_PROMPT,
     CONTROL_PROMPT,
@@ -77,10 +76,10 @@ class WotbotState(MessagesState):
     # Set by the route_to handoff tool to request continuation in another
     # branch; consumed and cleared by the dispatch node. Absent/None means the
     # turn ends normally. Only used when agent_handoff_enabled is set.
-    next: NotRequired[Optional[str]]
+    next: NotRequired[str | None]
     # Submitted as plain graph state by the chat UI. Only honored when it
     # matches the operator-configured allow-list; see _resolve_reasoning_effort.
-    reasoning_effort: NotRequired[Optional[str]]
+    reasoning_effort: NotRequired[str | None]
 
 
 class IntentClassification(BaseModel):
@@ -369,7 +368,7 @@ def _make_node_prompt(system_text: str, max_tokens: int):
     return prompt
 
 
-def _active_tools_for_config(tools: list[Any], config: Optional[RunnableConfig]) -> list[Any]:
+def _active_tools_for_config(tools: list[Any], config: RunnableConfig | None) -> list[Any]:
     if not tools:
         return []
 
@@ -384,7 +383,7 @@ def _active_tools_for_config(tools: list[Any], config: Optional[RunnableConfig])
     ]
 
 
-def _thread_id_from_config(config: Optional[RunnableConfig]) -> str | None:
+def _thread_id_from_config(config: RunnableConfig | None) -> str | None:
     configurable = config.get("configurable", {}) if config else {}
     thread_id = configurable.get("thread_id") or configurable.get("threadId")
     return thread_id if isinstance(thread_id, str) and thread_id else None
@@ -393,7 +392,7 @@ def _thread_id_from_config(config: Optional[RunnableConfig]) -> str | None:
 async def _with_camera_context(
     messages: list[BaseMessage],
     *,
-    config: Optional[RunnableConfig],
+    config: RunnableConfig | None,
     camera_frames_enabled: bool,
 ) -> list[BaseMessage]:
     if config and (
@@ -469,7 +468,7 @@ def _bind_runnable(
 def _log_branch_entry(
     branch: str,
     *,
-    config: Optional[RunnableConfig],
+    config: RunnableConfig | None,
     active_tools: list[Any],
     parallel_tool_calls: bool,
     reasoning_effort: str | None = None,

@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import timedelta
+from typing import ClassVar
 from uuid import uuid4
 
 from sqlalchemy import delete, select
@@ -21,7 +22,11 @@ from wotbot.core.time import utc_now
 
 
 class RawSubscriptions:
-    TOOLS = {"wot_observe_property", "wot_subscribe_event", "wot_remove_subscription"}
+    TOOLS: ClassVar[set[str]] = {
+        "wot_observe_property",
+        "wot_subscribe_event",
+        "wot_remove_subscription",
+    }
 
     def __init__(self, settings, *, client=None, session_factory=None):
         self.settings = settings

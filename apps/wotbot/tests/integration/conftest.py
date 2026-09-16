@@ -35,9 +35,11 @@ def _close_cached_database_handles() -> None:
 
 def _postgres_is_responsive(postgres_url: str) -> bool:
     try:
-        with psycopg.connect(postgres_url, connect_timeout=2) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
+        with (
+            psycopg.connect(postgres_url, connect_timeout=2) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute("SELECT 1")
         return True
     except psycopg.Error:
         return False

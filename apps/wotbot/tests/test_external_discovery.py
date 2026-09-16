@@ -155,7 +155,7 @@ class SourceRegistrationPermissionsTestCase(unittest.TestCase):
             app = FastAPI()
             app.state.settings = Settings()
             app.include_router(router)
-            app.dependency_overrides[require_user] = lambda: user
+            app.dependency_overrides[require_user] = lambda user=user: user
             for method, path, payload, service_method in (
                 ("POST", "/api/discovery/sources", body, "register_source"),
                 (
@@ -651,7 +651,7 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
                     )
                     session = MagicMock()
 
-                    async def chunks(size):
+                    async def chunks(size, body=body):
                         for offset in range(0, len(body), size):
                             yield body[offset : offset + size]
 

@@ -35,3 +35,18 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 target-version = "py312"
+
+[tool.ruff.lint]
+# Worker response validation uses RuntimeError/ValueError as protocol errors;
+# callers should not distinguish type mismatches from other malformed results.
+ignore = ["TRY004"]
+
+[tool.ruff.lint.per-file-ignores]
+# FastAPI evaluates Security() at import time by design.
+"code_executor/api/dependencies.py" = ["B008"]
+# Executing submitted code and containing arbitrary user-code failures are the
+# purpose of these process boundaries.
+"code_executor/execution_environment.py" = ["BLE001", "S102"]
+"code_executor/session_pool.py" = ["BLE001", "S110"]
+"code_executor/worker.py" = ["BLE001", "S110"]
+"code_executor/wot_client.py" = ["BLE001"]

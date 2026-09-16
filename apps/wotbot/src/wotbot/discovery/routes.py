@@ -23,7 +23,6 @@ from wotbot.discovery.errors import (
     SourceConflictError,
     SourceUnavailableError,
 )
-
 from wotbot.discovery.http import BoundedHttpClient
 from wotbot.discovery.providers import PROVIDERS
 from wotbot.discovery.service import DiscoveryService

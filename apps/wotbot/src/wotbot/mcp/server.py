@@ -151,22 +151,28 @@ def profile_tools(profile):
     utilities = [
         (
             "task.get",
-            "Retrieve a task snapshot, optionally waiting for completion or a pause. "
-            "Inspect status, messages, result, artifacts and pending. This does not start new work.",
+            (
+                "Retrieve a task snapshot, optionally waiting for completion or a pause. "
+                "Inspect status, messages, result, artifacts and pending. This does not start new work."
+            ),
             schema({"taskId": TASK_ID, "waitSeconds": {**WAIT, "default": 0}}, ["taskId"]),
         ),
         (
             "task.list",
-            "List this API key's tasks, optionally by context. Assistant/intents include A2A "
-            "tasks; raw lists only raw tasks. Returns tasks, total and nextCursor.",
+            (
+                "List this API key's tasks, optionally by context. Assistant/intents include A2A "
+                "tasks; raw lists only raw tasks. Returns tasks, total and nextCursor."
+            ),
             schema({"contextId": CONTEXT_ID, "cursor": CURSOR}),
         ),
         (
             "task.resume",
-            "Continue an input_required or auth_required task using every entry in pending. "
-            "Generate a new outer requestId for this resume; copy each pending requestId into "
-            "replies and match its responseSchema. Provision credentials through the credential "
-            "API, never in replies. Returns the updated task snapshot.",
+            (
+                "Continue an input_required or auth_required task using every entry in pending. "
+                "Generate a new outer requestId for this resume; copy each pending requestId into "
+                "replies and match its responseSchema. Provision credentials through the credential "
+                "API, never in replies. Returns the updated task snapshot."
+            ),
             schema(
                 {
                     "taskId": TASK_ID,
@@ -195,22 +201,28 @@ def profile_tools(profile):
         ),
         (
             "task.cancel",
-            "Cancel a running or paused task and return its updated snapshot after cleanup. "
-            "Completed actions are not undone. To stop an established raw subscription, "
-            "use wot_remove_subscription on the raw profile.",
+            (
+                "Cancel a running or paused task and return its updated snapshot after cleanup. "
+                "Completed actions are not undone. To stop an established raw subscription, "
+                "use wot_remove_subscription on the raw profile."
+            ),
             schema({"taskId": TASK_ID}, ["taskId"]),
         ),
         (
             "artifact.get",
-            "Retrieve this API key's artifact descriptor. Files include fresh temporary download "
-            "links while retained; panels include a panelUrl for the WoTBot UI. Does not regenerate "
-            "expired files. The resourceUri resolves to metadata, not file bytes.",
+            (
+                "Retrieve this API key's artifact descriptor. Files include fresh temporary download "
+                "links while retained; panels include a panelUrl for the WoTBot UI. Does not regenerate "
+                "expired files. The resourceUri resolves to metadata, not file bytes."
+            ),
             schema({"artifactId": ARTIFACT_ID}, ["artifactId"]),
         ),
         (
             "artifact.list",
-            "List this API key's artifact descriptors across profiles, optionally filtered by "
-            "task or context. Returns artifacts and nextCursor; expired entries are marked.",
+            (
+                "List this API key's artifact descriptors across profiles, optionally filtered by "
+                "task or context. Returns artifacts and nextCursor; expired entries are marked."
+            ),
             schema({"taskId": TASK_ID, "contextId": CONTEXT_ID, "cursor": CURSOR}),
         ),
     ]
@@ -218,10 +230,12 @@ def profile_tools(profile):
         utilities.append(
             (
                 "subscription.poll",
-                "Read at most one event from an owned raw subscription and renew its one-hour "
-                "idle lease. Use the creation result's cursor for the first poll, then nextCursor "
-                "from each poll. Returns event (null on timeout) and nextCursor. A lost or expired "
-                "subscription must be created again.",
+                (
+                    "Read at most one event from an owned raw subscription and renew its one-hour "
+                    "idle lease. Use the creation result's cursor for the first poll, then nextCursor "
+                    "from each poll. Returns event (null on timeout) and nextCursor. A lost or expired "
+                    "subscription must be created again."
+                ),
                 schema(
                     {
                         "contextId": {

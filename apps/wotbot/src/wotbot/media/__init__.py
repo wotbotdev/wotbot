@@ -14,10 +14,10 @@ from wotbot.media.snapshot_notifications import (
 )
 
 __all__ = [
-    "MediaSessionRegistry",
-    "MediaSessionStats",
     "SNAPSHOT_EVENT_TYPE",
     "SNAPSHOT_TOPIC",
+    "MediaSessionRegistry",
+    "MediaSessionStats",
     "SnapshotNotifierRegistry",
     "encode_frame_to_jpeg",
     "media_sessions",

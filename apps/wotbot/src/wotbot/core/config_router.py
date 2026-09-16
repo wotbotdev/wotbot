@@ -6,7 +6,8 @@ integrations are wired up, which is not something to hand to an anonymous
 caller.
 """
 
-from importlib.metadata import PackageNotFoundError, version as package_version
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as package_version
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request

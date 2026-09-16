@@ -1,8 +1,9 @@
-from contextlib import asynccontextmanager
 import os
+from contextlib import asynccontextmanager
 
 import pytest
 
+from wotbot.catalog.schema import load_td_schema
 from wotbot.core.config import get_settings
 from wotbot.core.database import (
     get_connection_pool,
@@ -11,7 +12,6 @@ from wotbot.core.database import (
 )
 from wotbot.core.lifecycle import shutdown_backend_runtime, start_backend_runtime
 from wotbot.search import set_active_search_service
-from wotbot.catalog.schema import load_td_schema
 
 
 class StubSearchService:

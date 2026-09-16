@@ -348,7 +348,7 @@ async def stream_run_events(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            logger.exception("Graph run failed thread_id=%s: %s", thread_id, exc)
+            logger.exception("Graph run failed thread_id=%s", thread_id)
             run_error = exc
         finally:
             await _persist(

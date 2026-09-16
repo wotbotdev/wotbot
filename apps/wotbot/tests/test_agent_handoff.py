@@ -5,8 +5,8 @@ Covers the dispatch node, the route_to tool, and end-to-end wiring of
 flag-off graph is structurally identical to the single-branch graph.
 """
 
-import unittest
 import logging
+import unittest
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool

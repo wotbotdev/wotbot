@@ -30,9 +30,11 @@ async def test_query_rdf_returns_structured_error_for_query_failures() -> None:
     )
     payload = RdfQueryRequest(query="SELECT ?s WHERE { ?s ?p ?o }", limit=10)
 
-    with patch("wotbot.rdf.api.verify_internal_api_key"):
-        with pytest.raises(HTTPException) as exc_info:
-            await rdf_api.query_rdf(request, payload)  # type: ignore[arg-type]
+    with (
+        patch("wotbot.rdf.api.verify_internal_api_key"),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await rdf_api.query_rdf(request, payload)  # type: ignore[arg-type]
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == {

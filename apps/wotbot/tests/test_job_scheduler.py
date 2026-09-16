@@ -1,7 +1,8 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from wotbot.agent.tools import job_scheduler
+from wotbot.jobs.active import set_active_job_service
 from wotbot.jobs.models import (
     CreateJobRequest,
     Job,
@@ -10,11 +11,10 @@ from wotbot.jobs.models import (
     JobTriggerKind,
     TimeTriggerKind,
 )
-from wotbot.jobs.active import set_active_job_service
 
 
 def _job(**overrides) -> Job:
-    now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
     action_kind = overrides.pop("action_kind", JobActionKind.PROMPT)
     prompt = overrides.pop("prompt", "check")
     analysis_code = overrides.pop("analysis_code", "print('ok')")

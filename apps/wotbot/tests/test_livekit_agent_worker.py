@@ -3,15 +3,16 @@ import json
 import pickle
 from unittest.mock import MagicMock, patch
 
+from langchain_core.messages import AIMessage, AIMessageChunk
+
 from wotbot.agent.device_interactions import DEVICE_INTERACTION_SUMMARY_TYPE
 from wotbot.agent.voice import assistant_text_from_graph_result
 from wotbot.core.settings import Settings
 from wotbot.media import SNAPSHOT_EVENT_TYPE, SNAPSHOT_TOPIC
 from wotbot.workers import livekit
-from wotbot.workers.livekit import worker as livekit_worker
 from wotbot.workers.livekit import speech as livekit_speech
+from wotbot.workers.livekit import worker as livekit_worker
 from wotbot.workers.livekit.graph import VoiceSafeGraphStream, compile_graph
-from langchain_core.messages import AIMessage, AIMessageChunk
 
 
 def test_livekit_session_handler_is_spawn_pickleable() -> None:

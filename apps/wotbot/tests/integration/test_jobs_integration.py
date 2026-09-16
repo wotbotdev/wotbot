@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from tests.job_helpers import create_job_request
 from wotbot.core.settings import Settings
 from wotbot.jobs.executor import JobExecutor
 from wotbot.jobs.graph_results import job_result_from_graph_result
@@ -31,7 +32,6 @@ from wotbot.jobs.schedule import build_schedule_source, schedule_id_for_job
 from wotbot.jobs.service import JobService
 from wotbot.jobs.stores import JobStore, utc_now
 from wotbot.threads.store import get_thread, list_threads
-from tests.job_helpers import create_job_request
 
 pytestmark = pytest.mark.integration
 

@@ -1,8 +1,10 @@
 """Code executor route handlers."""
 
+import asyncio
 import json
 import os
 import uuid
+from pathlib import Path
 
 from fastapi import Depends, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -44,8 +46,7 @@ async def store_web_artifact(req: WebArtifactRequest, request: Request):
 
     filename = f"{uuid.uuid4().hex}.html"
     filepath = os.path.join(settings.artifacts_dir, filename)
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(req.html)
+    await asyncio.to_thread(Path(filepath).write_text, req.html, encoding="utf-8")
 
     return WebArtifactResponse(filename=filename)
 
@@ -73,8 +74,7 @@ async def upload_file(request: Request, file: UploadFile):
     filepath = os.path.join(settings.artifacts_dir, filename)
 
     content = await file.read()
-    with open(filepath, "wb") as f:
-        f.write(content)
+    await asyncio.to_thread(Path(filepath).write_bytes, content)
 
     return UploadResponse(filename=filename, size_bytes=len(content))
 
@@ -104,12 +104,12 @@ async def get_artifact(filename: str, request: Request):
         return FileResponse(filepath, media_type="image/png")
 
     if filename.endswith(".html"):
-        with open(filepath, "r", encoding="utf-8") as f:
-            return HTMLResponse(content=f.read())
+        content = await asyncio.to_thread(Path(filepath).read_text, encoding="utf-8")
+        return HTMLResponse(content=content)
 
     if filename.endswith(".json"):
-        with open(filepath, "r") as f:
-            fig_json = json.load(f)
+        content = await asyncio.to_thread(Path(filepath).read_text, encoding="utf-8")
+        fig_json = json.loads(content)
         html = plotly_json_to_html(fig_json)
         return HTMLResponse(content=html)
 

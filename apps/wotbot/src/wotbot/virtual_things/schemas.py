@@ -382,8 +382,7 @@ def _validate_binding_coverage(
 def _looks_like_javascript_handler(value: str) -> bool:
     stripped = value.strip()
     return (
-        stripped.startswith("function ")
-        or stripped.startswith("return {")
+        stripped.startswith(("function ", "return {"))
         or "=>" in stripped
         or "??" in stripped
         or stripped.endswith("};")

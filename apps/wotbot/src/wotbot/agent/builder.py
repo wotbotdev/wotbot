@@ -6,8 +6,8 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from wotbot.agent.intents import INTENTS
 from wotbot.agent.device_interactions import make_device_interaction_summary_node
+from wotbot.agent.intents import INTENTS
 from wotbot.agent.nodes import (
     WotbotState,
     make_analysis_node,

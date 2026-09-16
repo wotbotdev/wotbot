@@ -45,10 +45,7 @@ async def enrich_thing_document(
     max_repair_attempts: int = 2,
     runnable_config: dict[str, Any] | None = None,
 ) -> EnrichmentResult:
-    try:
-        sanitized = validate_document(document)
-    except HTTPException:
-        raise
+    sanitized = validate_document(document)
     vocabulary = build_cached_vocabulary(config.model_dump_json())
     structured_llm = llm.with_structured_output(EnrichmentProposal)
 

@@ -1,7 +1,7 @@
 """FastAPI dependencies: auth and app state access."""
 
 from fastapi import HTTPException, Request, Security
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 security = HTTPBearer()
 

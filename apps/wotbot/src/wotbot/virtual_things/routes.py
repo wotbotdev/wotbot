@@ -228,7 +228,7 @@ async def define_virtual_thing_definition(
         return definition.model_dump(mode="json", by_alias=True)
     except Exception as exc:
         if isinstance(exc, HTTPException):
-            raise exc
+            raise
         raise virtual_thing_http_error(exc) from exc
 
 

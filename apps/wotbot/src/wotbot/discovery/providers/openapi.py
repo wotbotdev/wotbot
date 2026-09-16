@@ -409,11 +409,15 @@ class OpenApiProvider(DiscoveryProvider):
 _MAX_DOCS_SCAN = 262_144
 _DECLARED_SPEC_PATTERNS = (
     # The registered link relation for an API description.
-    re.compile(r"""rel\s*=\s*["']service-desc["'][^>]*?href\s*=\s*["']([^"']{1,2048})["']""", re.I),
-    re.compile(r"""href\s*=\s*["']([^"']{1,2048})["'][^>]*?rel\s*=\s*["']service-desc["']""", re.I),
+    re.compile(
+        r"""rel\s*=\s*["']service-desc["'][^>]*?href\s*=\s*["']([^"']{1,2048})["']""", re.IGNORECASE
+    ),
+    re.compile(
+        r"""href\s*=\s*["']([^"']{1,2048})["'][^>]*?rel\s*=\s*["']service-desc["']""", re.IGNORECASE
+    ),
     # ReDoc names it on the element; Swagger UI passes it in its config object.
-    re.compile(r"""spec-?url\s*[=:]\s*["']([^"']{1,2048})["']""", re.I),
-    re.compile(r"""(?:\burl|["']url["'])\s*:\s*["']([^"']{1,2048})["']""", re.I),
+    re.compile(r"""spec-?url\s*[=:]\s*["']([^"']{1,2048})["']""", re.IGNORECASE),
+    re.compile(r"""(?:\burl|["']url["'])\s*:\s*["']([^"']{1,2048})["']""", re.IGNORECASE),
 )
 
 
@@ -1190,8 +1194,8 @@ def _td_schema(document: dict[str, Any], raw: Any, stack: tuple[str, ...]) -> di
                 # is what FastAPI and Pydantic emit for every optional parameter.
                 # Collapsing it back to T keeps the declared type, so the
                 # parameter survives instead of being dropped as non-primitive.
-                for key, value in convert(variants[0], depth + 1).items():
-                    result.setdefault(key, value)
+                for key, converted_value in convert(variants[0], depth + 1).items():
+                    result.setdefault(key, converted_value)
             elif variants:
                 result[union_key] = [convert(child, depth + 1) for child in variants]
         if isinstance(item.get("allOf"), list):

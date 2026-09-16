@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-
 import pytest
 
-from wotbot.rdf.iris import RDF_THING_GRAPH_PREFIX, thing_graph_iri
+from wotbot.jobs.records.td import build_virtual_record_td
 from wotbot.rdf.contexts import expand_cached_jsonld_contexts
+from wotbot.rdf.iris import RDF_THING_GRAPH_PREFIX, thing_graph_iri
 from wotbot.rdf.runtime import RdfStreamConfig
 from wotbot.rdf.store import RdfStoreService, sparql_query_kind
-from wotbot.jobs.records.td import build_virtual_record_td
 
 
 def _jsonld_thing(thing_id: str, name: str) -> dict[str, object]:

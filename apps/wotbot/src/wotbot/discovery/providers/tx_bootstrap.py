@@ -32,9 +32,9 @@ from wotbot.discovery.providers.base import (
 from wotbot.discovery.providers.edc_v3 import (
     _MAX_OPENAPI_BYTES,
     _OPENAPI_COMPILER_VERSION,
-    _dataset_metadata,
     EdcApiDescription,
     EdcV3Provider,
+    _dataset_metadata,
     edc_api_description,
 )
 from wotbot.discovery.search import rank_candidates

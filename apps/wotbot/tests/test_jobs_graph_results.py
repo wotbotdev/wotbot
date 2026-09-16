@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.types import Command
@@ -30,7 +30,7 @@ from wotbot.jobs.models import (
 
 
 def _job(**overrides) -> Job:
-    now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
     action_kind = overrides.pop("action_kind", JobActionKind.PROMPT)
     prompt = overrides.pop("prompt", "Check the production queue")
     analysis_code = overrides.pop("analysis_code", "print('ok')")
@@ -118,7 +118,7 @@ def _job(**overrides) -> Job:
 
 
 def _run(**overrides) -> JobRun:
-    now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
     values = {
         "id": "run-1",
         "job_id": "job-1",

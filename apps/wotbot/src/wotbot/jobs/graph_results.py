@@ -473,7 +473,7 @@ def _interrupt_values_from_graph_result(result: Any) -> list[Any]:
         if isinstance(interrupt, dict) and "value" in interrupt:
             values.append(interrupt.get("value"))
         elif hasattr(interrupt, "value"):
-            values.append(getattr(interrupt, "value"))
+            values.append(interrupt.value)
         else:
             values.append(interrupt)
     return values

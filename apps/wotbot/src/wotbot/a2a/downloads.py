@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 from a2a.types import Artifact, Task, TaskArtifactUpdateEvent
 
 from wotbot.agent_api.downloads import ArtifactDownloadLinks as SharedDownloadLinks
-from wotbot.agent_api.downloads import InvalidDownloadLink as InvalidDownloadLink
+from wotbot.agent_api.downloads import InvalidDownloadLink as InvalidDownloadLink  # noqa: PLC0414
 
 
 class ArtifactDownloadLinks(SharedDownloadLinks):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Self
 
 import pytest
 
@@ -40,10 +40,10 @@ class _FakeSession:
     def commit(self) -> None:
         self.committed = True
 
-    def __enter__(self) -> "_FakeSession":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *_exc: Any) -> None:
+    def __exit__(self, *_exc: object) -> None:
         pass
 
 

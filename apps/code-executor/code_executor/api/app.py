@@ -34,4 +34,4 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Import routes so they are registered on the app
-from code_executor.api import routes as _routes  # noqa: E402, F401
+from code_executor.api import routes as _routes  # noqa: F401

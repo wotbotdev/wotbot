@@ -46,13 +46,13 @@ def scheduled_task_for_job(job: Job) -> ScheduledTask:
     ``time`` and are cleaned up automatically by the source's ``post_send`` once they
     fire.
     """
-    common = dict(
-        task_name=RUN_JOB_TASK_NAME,
-        labels={"job_id": job.id},
-        args=[],
-        kwargs={"job_id": job.id, "trigger": {"source": "time"}},
-        schedule_id=schedule_id_for_job(job.id),
-    )
+    common = {
+        "task_name": RUN_JOB_TASK_NAME,
+        "labels": {"job_id": job.id},
+        "args": [],
+        "kwargs": {"job_id": job.id, "trigger": {"source": "time"}},
+        "schedule_id": schedule_id_for_job(job.id),
+    }
     if not isinstance(job.trigger, TimeTrigger):
         raise ValueError(f"Job {job.id} is not time-triggered")
     schedule = job.trigger.schedule

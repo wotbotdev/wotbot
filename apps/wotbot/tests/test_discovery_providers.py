@@ -114,15 +114,19 @@ class EdcSecretHeaderTestCase(unittest.TestCase):
 
     def test_hop_by_hop_and_framing_headers_are_refused(self) -> None:
         for name in ("Host", "content-length", "Connection", "Transfer-Encoding"):
-            with self.subTest(header=name):
-                with self.assertRaisesRegex(SourceProtocolError, "unsafe authorization header"):
-                    secret_headers({"authKey": name, "authCode": "token"})
+            with (
+                self.subTest(header=name),
+                self.assertRaisesRegex(SourceProtocolError, "unsafe authorization header"),
+            ):
+                secret_headers({"authKey": name, "authCode": "token"})
 
     def test_a_header_name_with_separators_is_refused(self) -> None:
         for name in ("X-Api Key", "X-Api:Key", "X-Api\nInjected", "X-Api\r\nSet-Cookie"):
-            with self.subTest(header=name):
-                with self.assertRaisesRegex(SourceProtocolError, "unsafe authorization header"):
-                    secret_headers({"authKey": name, "authCode": "token"})
+            with (
+                self.subTest(header=name),
+                self.assertRaisesRegex(SourceProtocolError, "unsafe authorization header"),
+            ):
+                secret_headers({"authKey": name, "authCode": "token"})
 
     def test_an_incomplete_reference_is_refused(self) -> None:
         with self.assertRaises(SourceProtocolError):
@@ -154,9 +158,11 @@ class EdcTtlTestCase(unittest.TestCase):
 
     def test_an_already_expired_reference_is_refused(self) -> None:
         for address in ({"expiresIn": 0}, {"expiresIn": -1}, {"expiresAt": 900}):
-            with self.subTest(address=address):
-                with self.assertRaisesRegex(SourceProtocolError, "expired"):
-                    edr_ttl(address, now=1_000_000)
+            with (
+                self.subTest(address=address),
+                self.assertRaisesRegex(SourceProtocolError, "expired"),
+            ):
+                edr_ttl(address, now=1_000_000)
 
     def test_an_unparseable_expiry_is_refused_rather_than_ignored(self) -> None:
         for address in ({"expiresIn": "soon"}, {"expiresAt": "not-a-date"}):
@@ -623,11 +629,15 @@ class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_other_protocol_errors_are_not_retried_as_oversized_pages(self) -> None:
         source = udata_source()
-        with patch.object(
-            UdataProvider, "_json", new=AsyncMock(side_effect=SourceProtocolError("invalid JSON"))
-        ) as fetch:
-            with self.assertRaisesRegex(SourceProtocolError, "invalid JSON"):
-                await UdataProvider().search(source, prepare_search_intent("", source), 25)
+        with (
+            patch.object(
+                UdataProvider,
+                "_json",
+                new=AsyncMock(side_effect=SourceProtocolError("invalid JSON")),
+            ) as fetch,
+            self.assertRaisesRegex(SourceProtocolError, "invalid JSON"),
+        ):
+            await UdataProvider().search(source, prepare_search_intent("", source), 25)
         fetch.assert_awaited_once()
 
     async def test_the_query_reaches_the_backend_instead_of_being_filtered_locally(self) -> None:
@@ -665,9 +675,11 @@ class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
         async def fake_json(_self: object, _source: object, _url: str, **_kw: object) -> object:
             return {"unexpected": "shape"}
 
-        with patch.object(UdataProvider, "_json", new=fake_json):
-            with self.assertRaises(SourceProtocolError):
-                await UdataProvider().search(source, prepare_search_intent("roads", source), 5)
+        with (
+            patch.object(UdataProvider, "_json", new=fake_json),
+            self.assertRaises(SourceProtocolError),
+        ):
+            await UdataProvider().search(source, prepare_search_intent("roads", source), 5)
 
     async def test_a_dataset_that_only_points_at_a_service_suggests_registering_it(
         self,
@@ -748,11 +760,13 @@ class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
         async def fake_json(_self: object, _source: object, _url: str, **_kw: object) -> object:
             return dataset
 
-        with patch.object(UdataProvider, "_json", new=fake_json):
-            with self.assertRaisesRegex(SourceProtocolError, "link and cannot be downloaded"):
-                await UdataProvider().acquire(
-                    source, external_id="roads", title="Roads", resource_id="doc"
-                )
+        with (
+            patch.object(UdataProvider, "_json", new=fake_json),
+            self.assertRaisesRegex(SourceProtocolError, "link and cannot be downloaded"),
+        ):
+            await UdataProvider().acquire(
+                source, external_id="roads", title="Roads", resource_id="doc"
+            )
 
     async def test_a_resource_that_vanished_is_reported_as_a_source_problem(self) -> None:
         source = udata_source()
@@ -760,11 +774,13 @@ class UdataProviderTestCase(unittest.IsolatedAsyncioTestCase):
         async def fake_json(_self: object, _source: object, _url: str, **_kw: object) -> object:
             return {"id": "roads", "resources": []}
 
-        with patch.object(UdataProvider, "_json", new=fake_json):
-            with self.assertRaisesRegex(SourceProtocolError, "no longer available"):
-                await UdataProvider().acquire(
-                    source, external_id="roads", title="Roads", resource_id="csv"
-                )
+        with (
+            patch.object(UdataProvider, "_json", new=fake_json),
+            self.assertRaisesRegex(SourceProtocolError, "no longer available"),
+        ):
+            await UdataProvider().acquire(
+                source, external_id="roads", title="Roads", resource_id="csv"
+            )
 
 
 class DcatTestCase(unittest.IsolatedAsyncioTestCase):
@@ -819,14 +835,16 @@ class DcatTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_dataset_that_left_the_catalog_cannot_be_acquired(self) -> None:
         source = dcat_source()
-        with patch.object(DcatProvider, "_graph", new=AsyncMock(return_value=self._graph())):
-            with self.assertRaisesRegex(SourceProtocolError, "no longer available"):
-                await DcatProvider().acquire(
-                    source,
-                    external_id="https://data.example/dataset/gone",
-                    title="Gone",
-                    resource_id="whatever",
-                )
+        with (
+            patch.object(DcatProvider, "_graph", new=AsyncMock(return_value=self._graph())),
+            self.assertRaisesRegex(SourceProtocolError, "no longer available"),
+        ):
+            await DcatProvider().acquire(
+                source,
+                external_id="https://data.example/dataset/gone",
+                title="Gone",
+                resource_id="whatever",
+            )
 
 
 if __name__ == "__main__":

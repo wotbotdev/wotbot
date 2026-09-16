@@ -47,17 +47,19 @@ def test_uncertain_execution_is_never_replayed(failure):
         raise failure("Response lost", request=request)
 
     real_client = httpx.AsyncClient
-    with patch(
-        "wotbot.clients.code_executor.httpx.AsyncClient",
-        side_effect=lambda **kw: real_client(transport=httpx.MockTransport(execute), **kw),
+    with (
+        patch(
+            "wotbot.clients.code_executor.httpx.AsyncClient",
+            side_effect=lambda **kw: real_client(transport=httpx.MockTransport(execute), **kw),
+        ),
+        pytest.raises(CodeExecutionUncertainError, match="may already have applied"),
     ):
-        with pytest.raises(CodeExecutionUncertainError, match="may already have applied"):
-            asyncio.run(
-                CodeExecutorClient(settings()).execute(
-                    session_id="test",
-                    code="wot.invoke_action('urn:test:device', 'toggle')",
-                )
+        asyncio.run(
+            CodeExecutorClient(settings()).execute(
+                session_id="test",
+                code="wot.invoke_action('urn:test:device', 'toggle')",
             )
+        )
     assert len(applied) == 1
 
 
@@ -93,12 +95,14 @@ def test_http_rejection_is_not_retried():
         return httpx.Response(429)
 
     real_client = httpx.AsyncClient
-    with patch(
-        "wotbot.clients.code_executor.httpx.AsyncClient",
-        side_effect=lambda **kw: real_client(transport=httpx.MockTransport(reject), **kw),
+    with (
+        patch(
+            "wotbot.clients.code_executor.httpx.AsyncClient",
+            side_effect=lambda **kw: real_client(transport=httpx.MockTransport(reject), **kw),
+        ),
+        pytest.raises(httpx.HTTPStatusError),
     ):
-        with pytest.raises(httpx.HTTPStatusError):
-            asyncio.run(CodeExecutorClient(settings()).execute(session_id="test", code="pass"))
+        asyncio.run(CodeExecutorClient(settings()).execute(session_id="test", code="pass"))
     assert len(attempts) == 1
 
 
@@ -111,12 +115,14 @@ def test_invalid_response_is_uncertain_and_not_retried(body):
         return httpx.Response(200, content=body)
 
     real_client = httpx.AsyncClient
-    with patch(
-        "wotbot.clients.code_executor.httpx.AsyncClient",
-        side_effect=lambda **kw: real_client(transport=httpx.MockTransport(execute), **kw),
+    with (
+        patch(
+            "wotbot.clients.code_executor.httpx.AsyncClient",
+            side_effect=lambda **kw: real_client(transport=httpx.MockTransport(execute), **kw),
+        ),
+        pytest.raises(CodeExecutionUncertainError),
     ):
-        with pytest.raises(CodeExecutionUncertainError):
-            asyncio.run(CodeExecutorClient(settings()).execute(session_id="test", code="pass"))
+        asyncio.run(CodeExecutorClient(settings()).execute(session_id="test", code="pass"))
     assert len(attempts) == 1
 
 

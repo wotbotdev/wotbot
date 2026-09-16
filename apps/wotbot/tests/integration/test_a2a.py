@@ -54,7 +54,7 @@ def environment(jobs_integration_environment):
         second, token2 = create_api_key(
             session, user_id="same-admin", name="second", scopes=["agent:invoke"]
         )
-        limited, token3 = create_api_key(
+        _limited, token3 = create_api_key(
             session, user_id="same-admin", name="limited", scopes=["things:read"]
         )
     return first.id, token, second.id, token2, token3
@@ -416,7 +416,7 @@ async def test_revocation_stops_running_execution_and_blocks_retrieval(environme
 
 
 async def test_artifacts_stream_from_the_executor_and_expire_with_owner_isolation(environment):
-    owner, token, other, token2, _ = environment
+    owner, token, _other, token2, _ = environment
 
     async def node(state):
         return {
@@ -706,7 +706,7 @@ async def test_generated_panel_is_saved_and_exported_as_a_panel_pointer(environm
     from wotbot.panels.models import Panel, PanelVersion
     from wotbot.panels.render import wrap_panel_document
 
-    owner, token, other, token2, limited = environment
+    owner, _token, _other, _token2, _limited = environment
     markup = "<button onclick=\"wot.writeProperty('lamp','power',true)\">On</button>"
     caps = [{"thingId": "lamp", "affordances": ["power"], "ops": ["writeProperty"]}]
     collector = ArtifactCollector(
@@ -1036,7 +1036,7 @@ async def _exercise_download_links(environment, settings):
     from wotbot.a2a.downloads import ArtifactDownloadLinks
     from wotbot.discovery.store import client_for
 
-    owner, token, other, token2, _ = environment
+    owner, token, _other, token2, _ = environment
 
     async def node(state):
         return {
@@ -1194,7 +1194,7 @@ async def test_download_grants_stop_working_when_the_owner_key_loses_access(envi
     from wotbot.a2a.downloads import ArtifactDownloadLinks
     from wotbot.agent_api.artifacts import ArtifactStore
 
-    owner, token, *_ = environment
+    owner, _token, *_ = environment
     store = ArtifactStore()
     artifact_id = str(uuid4())
     await store.put(

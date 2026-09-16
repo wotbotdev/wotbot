@@ -1,5 +1,5 @@
-import unittest
 import asyncio
+import unittest
 from types import SimpleNamespace
 
 from wotbot.core.settings import Settings

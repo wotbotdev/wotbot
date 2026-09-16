@@ -4,6 +4,7 @@ from datetime import timedelta
 
 import pytest
 
+from tests.job_helpers import create_job_request
 from wotbot.core.config import get_settings
 from wotbot.core.database import (
     get_connection_pool,
@@ -29,8 +30,6 @@ from wotbot.jobs.stores import (
     job_run_thread_id_for_run,
     utc_now,
 )
-from tests.job_helpers import create_job_request
-
 
 pytestmark = pytest.mark.skipif(
     not os.getenv("WOTBOT_TEST_DATABASE_URL"),

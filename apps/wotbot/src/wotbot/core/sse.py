@@ -68,7 +68,7 @@ async def sse_with_heartbeat(
                 pending = asyncio.ensure_future(iterator.__anext__())
             try:
                 frame = await asyncio.wait_for(asyncio.shield(pending), timeout)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield _emit(KEEPALIVE_FRAME)
                 continue
             except StopAsyncIteration:
@@ -84,9 +84,7 @@ async def sse_with_heartbeat(
         )
         raise
     except Exception as exc:
-        logger.exception(
-            "SSE stream raised after %d frames, %d bytes: %s", sent_frames, sent_bytes, exc
-        )
+        logger.exception("SSE stream raised after %d frames, %d bytes", sent_frames, sent_bytes)
         try:
             yield _emit(format_sse_error(exc))
         except Exception:  # pragma: no cover - stream already gone

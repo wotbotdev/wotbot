@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
-from wotbot.core.config import get_settings
 from wotbot.api.main import app
+from wotbot.core.config import get_settings
 
 
 def _wot_runtime_headers(token: str) -> dict[str, str]:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from wotbot.core.database import get_session_factory
 from wotbot.core.json import json_safe as _json_safe
-from wotbot.core.time import utc_now as utc_now
+from wotbot.core.time import utc_now as utc_now  # noqa: PLC0414
 from wotbot.jobs.db import JobRecord, JobRunEventRecord, JobRunRecord
 from wotbot.jobs.enums import (
     JobInteractionMode,

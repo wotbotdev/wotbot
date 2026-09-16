@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -85,7 +85,7 @@ def update_job_request(**values):
 
 
 def _job(**overrides) -> Job:
-    now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
     action_kind = overrides.pop("action_kind", JobActionKind.PROMPT)
     prompt = overrides.pop("prompt", "Check the production queue")
     analysis_code = overrides.pop("analysis_code", "print('ok')")
@@ -249,8 +249,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
                     source=JobRunSource.MANUAL,
                     status=JobRunStatus.RUNNING,
                     trigger_payload={"source": "manual"},
-                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
-                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
+                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
                 ),
                 trigger={"source": "manual"},
             )
@@ -326,8 +326,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
                     source=JobRunSource.MANUAL,
                     status=JobRunStatus.RUNNING,
                     trigger_payload={"source": "user_reply", "message": "42"},
-                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
-                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
+                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
                 ),
                 trigger={"source": "user_reply", "message": "42", "previous_run_id": "run-1"},
             )
@@ -411,8 +411,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
                         "message": "2, tired and headache",
                     },
                     result={"metadata": {"pending_interrupt": True}},
-                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
-                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
+                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
                 ),
                 trigger={
                     "source": "user_reply",
@@ -476,8 +476,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
                     source=JobRunSource.MANUAL,
                     status=JobRunStatus.RUNNING,
                     trigger_payload={"source": "manual"},
-                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
-                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
+                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
                 ),
                 trigger={"source": "manual"},
             )
@@ -521,8 +521,8 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
                     source=JobRunSource.MANUAL,
                     status=JobRunStatus.RUNNING,
                     trigger_payload={"source": "manual"},
-                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
-                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc),
+                    started_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
+                    created_at=datetime(2026, 5, 31, 12, 0, tzinfo=UTC),
                 ),
                 trigger={"source": "manual"},
             )
@@ -579,7 +579,7 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
 
 class JobRunEventMessageTestCase(unittest.TestCase):
     def test_job_run_events_convert_to_thread_messages(self) -> None:
-        created_at = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+        created_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
         messages = _messages_from_job_run_events(
             [
                 JobRunEvent(
@@ -1027,7 +1027,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["assistant"], "1 chart · Analysis finished")
 
     async def test_one_shot_time_job_disabled_after_scheduled_run(self) -> None:
-        run_at = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+        run_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
         repo = _FakeRepo(
             _job(
                 schedule_kind=TimeTriggerKind.ONCE,
@@ -1059,7 +1059,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
             agent_runner=agent_runner,
             event_publisher=_FakePublisher(),
         )
-        now = datetime(2026, 5, 31, 12, 30, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 31, 12, 30, tzinfo=UTC)
 
         with patch("wotbot.jobs.executor.utc_now", return_value=now):
             await executor.run_job("job-1", {"source": "time"})
@@ -1087,7 +1087,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
             agent_runner=agent_runner,
             event_publisher=_FakePublisher(),
         )
-        now = datetime(2026, 6, 2, 10, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 2, 10, 0, tzinfo=UTC)
 
         with patch("wotbot.jobs.executor.utc_now", return_value=now):
             await executor.run_job("job-1", {"source": "time"})
@@ -1095,7 +1095,7 @@ class JobExecutorTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(repo.disabled, [])
         self.assertEqual(
             repo.finished_runs[0]["next_run_at"],
-            datetime(2026, 6, 7, 7, 0, tzinfo=timezone.utc),
+            datetime(2026, 6, 7, 7, 0, tzinfo=UTC),
         )
 
     async def test_manual_interval_run_does_not_advance_next_run_at(self) -> None:
@@ -1503,8 +1503,8 @@ class JobDomainTestCase(unittest.TestCase):
         )
 
     def test_time_schedule_helpers_handle_create_time_and_post_run_next_times(self) -> None:
-        now = datetime(2026, 6, 2, 10, 0, tzinfo=timezone.utc)
-        one_shot_time = datetime(2026, 6, 1, 10, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 6, 2, 10, 0, tzinfo=UTC)
+        one_shot_time = datetime(2026, 6, 1, 10, 0, tzinfo=UTC)
 
         interval_next = _job(interval_seconds=60).next_run_at_after(now=now)
         cron_next = _job(
@@ -1534,7 +1534,7 @@ class JobDomainTestCase(unittest.TestCase):
         ).initial_next_run_at(now=now)
 
         self.assertEqual(interval_next, now + timedelta(seconds=60))
-        self.assertEqual(cron_next, datetime(2026, 6, 7, 7, 0, tzinfo=timezone.utc))
+        self.assertEqual(cron_next, datetime(2026, 6, 7, 7, 0, tzinfo=UTC))
         self.assertEqual(create_once_next, one_shot_time)
         self.assertIsNone(post_run_once_next)
         self.assertIsNone(event_next)
@@ -1542,7 +1542,7 @@ class JobDomainTestCase(unittest.TestCase):
     def test_disabled_time_job_has_no_next_run(self) -> None:
         job = _job(enabled=False, interval_seconds=60)
         next_run_at = job.next_run_at_after(
-            now=datetime(2026, 6, 2, 10, 0, tzinfo=timezone.utc),
+            now=datetime(2026, 6, 2, 10, 0, tzinfo=UTC),
             enabled=job.enabled,
         )
 
@@ -1608,7 +1608,7 @@ class JobServiceTaskiqTestCase(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_duplicate_reply_id_returns_existing_run_without_enqueue(self) -> None:
-        now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
         duplicate_run = JobRun(
             id="run-1",
             job_id="job-1",
@@ -2306,7 +2306,7 @@ class JobScheduleManagerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task.kwargs, {"job_id": "job-1", "trigger": {"source": "time"}})
 
     async def test_one_shot_job_builds_time_schedule(self) -> None:
-        run_at = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+        run_at = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
         task = scheduled_task_for_job(
             _job(
                 schedule_kind=TimeTriggerKind.ONCE,
@@ -2673,7 +2673,7 @@ class JobsEventsRouteTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
 
     def test_runs_route_returns_job_run_history(self) -> None:
-        now = datetime(2026, 5, 31, 12, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 5, 31, 12, 0, tzinfo=UTC)
 
         class FakeService:
             def __init__(self) -> None:

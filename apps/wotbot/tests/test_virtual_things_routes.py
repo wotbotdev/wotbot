@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -47,7 +47,7 @@ def _definition(
 
 
 class _FakeVirtualThingStore:
-    definitions: dict[str, VirtualThingDefinition] = {}
+    definitions: ClassVar[dict[str, VirtualThingDefinition]] = {}
 
     def list_definitions(
         self,
@@ -94,7 +94,7 @@ class _FakeVirtualThingStore:
 
 
 class _FakeValidator:
-    requests: list[DefineVirtualThingRequest] = []
+    requests: ClassVar[list[DefineVirtualThingRequest]] = []
 
     async def validate(
         self,

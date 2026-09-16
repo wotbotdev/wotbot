@@ -8,8 +8,8 @@ from wotbot.clients.code_executor import CodeExecutorClient
 from wotbot.core.settings import Settings
 from wotbot.virtual_things.cache import get_cached_value, set_cached_value
 from wotbot.virtual_things.handler import (
-    HandlerRunResult,
     RESULT_PREFIX,
+    HandlerRunResult,
     VirtualThingHandlerRunner,
 )
 from wotbot.virtual_things.schemas import json_safe

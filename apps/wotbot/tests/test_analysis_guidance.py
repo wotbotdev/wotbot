@@ -62,16 +62,7 @@ class AnalysisGuidanceTestCase(unittest.TestCase):
         self.assertIn("sparqlQuery", ANALYSIS_PROMPT)
 
     def test_active_prompts_do_not_assume_a_home_context(self) -> None:
-        combined = "\n".join(
-            [
-                ROUTER_PROMPT,
-                RESPOND_PROMPT,
-                CONTROL_PROMPT,
-                ANALYSIS_PROMPT,
-                JOBS_PROMPT,
-                VIRTUAL_THINGS_PROMPT,
-            ]
-        ).casefold()
+        combined = f"{ROUTER_PROMPT}\n{RESPOND_PROMPT}\n{CONTROL_PROMPT}\n{ANALYSIS_PROMPT}\n{JOBS_PROMPT}\n{VIRTUAL_THINGS_PROMPT}".casefold()
 
         for phrase in (
             "household",

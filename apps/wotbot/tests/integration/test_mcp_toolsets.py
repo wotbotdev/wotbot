@@ -29,8 +29,8 @@ from wotbot.core.time import utc_now
 from wotbot.mcp.server import MCPToolRuntime, profile_tools
 from wotbot.threads.models import Thread
 
-from .test_a2a import anyio_backend as anyio_backend
-from .test_a2a import environment as environment
+from .test_a2a import anyio_backend as anyio_backend  # noqa: PLC0414
+from .test_a2a import environment as environment  # noqa: PLC0414
 from .test_a2a import fake_executor, finish, graph_for, request, running
 
 pytestmark = [pytest.mark.integration, pytest.mark.anyio]
@@ -476,7 +476,7 @@ async def test_official_mcp_client_profiles_and_auth(environment, profile):
     from wotbot.a2a.server import install_downloads
     from wotbot.agent_api.outputs import ArtifactCollector
 
-    owner, token, other, other_token, limited = environment
+    owner, token, _other, other_token, limited = environment
 
     async def node(state):
         return {"messages": [AIMessage(content="SDK assistant answer")]}
@@ -492,57 +492,61 @@ async def test_official_mcp_client_profiles_and_auth(environment, profile):
         install_downloads(app, Settings())
         async with mcp.lifespan(), serve(app) as base:
             # Supply an allowed public host while exercising real network transport.
-            async with httpx2.AsyncClient(
-                headers={"Authorization": "Bearer " + token, "Host": "localhost:8000"}
-            ) as http:
-                async with Client(
+            async with (
+                httpx2.AsyncClient(
+                    headers={"Authorization": "Bearer " + token, "Host": "localhost:8000"}
+                ) as http,
+                Client(
                     streamable_http_client(base + "/mcp/" + profile, http_client=http)
-                ) as client:
-                    assert client.server_capabilities.resources is not None
-                    assert (await client.list_resources()).resources == []
-                    listing = await client.list_tools()
-                    names = {t.name for t in listing.tools}
-                    assert set(profile_tools(profile)) <= names
-                    if profile == "raw":
-                        result = await client.call_tool(
-                            "get_current_time", {"requestId": "sdk-clock", "arguments": {}}
-                        )
-                    elif profile == "intents":
-                        result = await client.call_tool(
-                            "intent.chat", {"requestId": "sdk-chat", "message": "Hello"}
-                        )
-                    else:
-                        result = await client.call_tool(
-                            "ask_wotbot", {"requestId": "sdk-chat", "message": "Hello"}
-                        )
-                    assert not result.is_error, result
-                    task = result.structured_content
-                    assert task["status"] == "completed"
-                    collector = ArtifactCollector(
-                        settings=runtime.settings,
-                        owner=owner,
-                        task_id=task["taskId"],
-                        thread_id=task["contextId"],
+                ) as client,
+            ):
+                assert client.server_capabilities.resources is not None
+                assert (await client.list_resources()).resources == []
+                listing = await client.list_tools()
+                names = {t.name for t in listing.tools}
+                assert set(profile_tools(profile)) <= names
+                if profile == "raw":
+                    result = await client.call_tool(
+                        "get_current_time", {"requestId": "sdk-clock", "arguments": {}}
                     )
-                    artifacts = await collector.record_tool_result(
-                        "get_current_time", {}, {"time": "now"}, "sdk-artifact"
+                elif profile == "intents":
+                    result = await client.call_tool(
+                        "intent.chat", {"requestId": "sdk-chat", "message": "Hello"}
                     )
-                    artifact = await client.call_tool(
-                        "artifact.get", {"artifactId": artifacts[0].artifact_id}
+                else:
+                    result = await client.call_tool(
+                        "ask_wotbot", {"requestId": "sdk-chat", "message": "Hello"}
                     )
-                    assert not artifact.is_error, artifact
-                    link = next(part for part in artifact.content if part.type == "resource_link")
-                    resource = await client.read_resource(str(link.uri))
-                    descriptor = json.loads(resource.contents[0].text)
-                    assert descriptor["artifactId"] == artifacts[0].artifact_id
-                    assert descriptor["artifact"]["parts"][0]["data"]["result"] == {"time": "now"}
-            async with httpx2.AsyncClient(
-                headers={"Authorization": "Bearer " + other_token, "Host": "localhost:8000"}
-            ) as http:
-                async with Client(
+                assert not result.is_error, result
+                task = result.structured_content
+                assert task["status"] == "completed"
+                collector = ArtifactCollector(
+                    settings=runtime.settings,
+                    owner=owner,
+                    task_id=task["taskId"],
+                    thread_id=task["contextId"],
+                )
+                artifacts = await collector.record_tool_result(
+                    "get_current_time", {}, {"time": "now"}, "sdk-artifact"
+                )
+                artifact = await client.call_tool(
+                    "artifact.get", {"artifactId": artifacts[0].artifact_id}
+                )
+                assert not artifact.is_error, artifact
+                link = next(part for part in artifact.content if part.type == "resource_link")
+                resource = await client.read_resource(str(link.uri))
+                descriptor = json.loads(resource.contents[0].text)
+                assert descriptor["artifactId"] == artifacts[0].artifact_id
+                assert descriptor["artifact"]["parts"][0]["data"]["result"] == {"time": "now"}
+            async with (
+                httpx2.AsyncClient(
+                    headers={"Authorization": "Bearer " + other_token, "Host": "localhost:8000"}
+                ) as http,
+                Client(
                     streamable_http_client(base + "/mcp/" + profile, http_client=http)
-                ) as client:
-                    assert (await client.call_tool("task.get", {"taskId": task["taskId"]})).is_error
+                ) as client,
+            ):
+                assert (await client.call_tool("task.get", {"taskId": task["taskId"]})).is_error
             async with httpx.AsyncClient(base_url=base, headers={"Host": "localhost:8000"}) as http:
                 assert (
                     await http.post(

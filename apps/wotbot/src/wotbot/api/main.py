@@ -160,8 +160,8 @@ async def lifespan(app: FastAPI):
                 async with AsyncExitStack() as stack:
                     if settings.a2a_enabled or settings.mcp_enabled:
                         from wotbot.a2a.runtime import A2ARuntime
-                        from wotbot.agent_api.runtime import AgentRuntime
                         from wotbot.agent_api.raw import build_raw_graph
+                        from wotbot.agent_api.runtime import AgentRuntime
                         from wotbot.agent_api.subscriptions import RawSubscriptions
 
                         subscriptions = RawSubscriptions(settings)

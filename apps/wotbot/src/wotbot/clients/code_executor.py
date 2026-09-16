@@ -111,13 +111,13 @@ class CodeExecutorClient:
     @asynccontextmanager
     async def stream_artifact(self, identifier: str):
         """Keep the upstream response open until its consumer finishes or disconnects."""
-        async with httpx.AsyncClient(
-            timeout=self._settings.code_executor_timeout_seconds
-        ) as client:
-            async with client.stream(
+        async with (
+            httpx.AsyncClient(timeout=self._settings.code_executor_timeout_seconds) as client,
+            client.stream(
                 "GET", self._artifact_url(identifier, "content"), headers=self._headers()
-            ) as response:
-                yield response
+            ) as response,
+        ):
+            yield response
 
     async def read_artifact(self, identifier: str, *, max_bytes: int) -> bytes:
         async with self.stream_artifact(identifier) as response:

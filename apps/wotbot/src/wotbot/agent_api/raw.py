@@ -19,15 +19,14 @@ class RawState(MessagesState):
 
 
 def result_error(result):
-    if isinstance(result, dict):
-        if (
-            result.get("error")
-            or result.get("ok") is False
-            or result.get("status") in {"error", "failed", "stopped", "credential_cancelled"}
-        ):
-            return str(
-                result.get("error") or "Tool execution failed; actions may already have occurred"
-            )
+    if isinstance(result, dict) and (
+        result.get("error")
+        or result.get("ok") is False
+        or result.get("status") in {"error", "failed", "stopped", "credential_cancelled"}
+    ):
+        return str(
+            result.get("error") or "Tool execution failed; actions may already have occurred"
+        )
     return None
 
 

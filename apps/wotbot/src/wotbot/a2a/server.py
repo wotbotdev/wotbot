@@ -25,7 +25,7 @@ from starlette.routing import Route
 
 from wotbot.a2a.downloads import ArtifactDownloadLinks
 from wotbot.agent.intents import INTENTS, OUTPUT_MODES
-from wotbot.agent_api.http import install_downloads as install_downloads
+from wotbot.agent_api.http import install_downloads
 
 logger = logging.getLogger(__name__)
 

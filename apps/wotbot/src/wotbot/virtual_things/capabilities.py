@@ -28,7 +28,8 @@ guard blocks it unless the author declares the capability explicitly.
 from __future__ import annotations
 
 import ast
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 _OP_BY_METHOD = {
     "read_property": "readProperty",
@@ -124,7 +125,7 @@ def _build_const_resolver(tree: ast.AST) -> Callable[[str], Any]:
         exprs = assignments.get(name)
         if not exprs or name in stack:
             return _DYNAMIC
-        lookup = lambda inner: resolve(inner, stack + (name,))  # noqa: E731
+        lookup = lambda inner: resolve(inner, stack + (name,))
         value: Any = _UNSET
         for expr in exprs:
             ok, resolved = _eval_literal(expr, lookup)

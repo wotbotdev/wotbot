@@ -82,7 +82,7 @@ def _parse_sse(frames: list[str]) -> list[tuple[str, Any]]:
             if not line or line.startswith(":"):
                 continue
             field, _, value = line.partition(":")
-            value = value[1:] if value.startswith(" ") else value
+            value = value.removeprefix(" ")
             if field == "event":
                 event = value
             elif field == "data":

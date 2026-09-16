@@ -78,6 +78,39 @@ packages = ["src/wotbot"]
 target-version = "py312"
 line-length = 100
 
+[tool.ruff.lint]
+# WoTBot validates external payloads with ValueError consistently, including
+# type mismatches, so TRY004's TypeError preference does not fit these public
+# validation contracts.
+ignore = ["TRY004"]
+
+[tool.ruff.lint.per-file-ignores]
+# LangGraph recognizes these runtime-injected callbacks by the exact postponed
+# annotation string ``Optional[RunnableConfig]``; PEP 604 syntax breaks it.
+"src/wotbot/agent/nodes.py" = ["UP045"]
+# FastAPI evaluates Depends() declarations at import time by design.
+"src/wotbot/**/router.py" = ["B008"]
+"src/wotbot/**/routes.py" = ["B008"]
+"src/wotbot/api/wot_runtime.py" = ["B008"]
+"src/wotbot/auth/dependencies.py" = ["B008"]
+# These boundaries deliberately turn arbitrary provider, tool, and worker
+# failures into stable API results or keep long-running consumers alive.
+"src/wotbot/agent/tools/*.py" = ["BLE001"]
+"src/wotbot/agent_api/*.py" = ["BLE001", "S112"]
+"src/wotbot/core/sse.py" = ["BLE001", "S110"]
+"src/wotbot/jobs/**/*.py" = ["BLE001"]
+"src/wotbot/mcp/server.py" = ["BLE001"]
+"src/wotbot/media/*.py" = ["BLE001"]
+"src/wotbot/rdf/*.py" = ["BLE001"]
+"src/wotbot/thing_indexer/*.py" = ["BLE001"]
+"src/wotbot/virtual_things/enrichment.py" = ["BLE001"]
+"src/wotbot/virtual_things/validator.py" = ["BLE001"]
+"src/wotbot/workers/thing_indexer.py" = ["BLE001"]
+# These tests intentionally execute generated sandbox/handler code.
+"tests/test_jobs_taskiq.py" = ["S102"]
+"tests/test_virtual_thing_handler.py" = ["S102"]
+"tests/test_virtual_things.py" = ["S102"]
+
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 markers = [
