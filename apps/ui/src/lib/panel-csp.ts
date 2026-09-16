@@ -55,6 +55,8 @@ const FONT_CDNS = ['https://fonts.gstatic.com', ...SCRIPT_CDNS];
 const TILE_HOSTS = [
   'https://tile.openstreetmap.org',
   'https://*.tile.openstreetmap.org',
+  // Esri World Imagery, as used by Plotly map layers.
+  'https://server.arcgisonline.com',
 ];
 
 export const PANEL_CSP = [

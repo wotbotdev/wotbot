@@ -60,6 +60,7 @@ test('images are restricted to named hosts', () => {
   assert.ok(imgSrc.includes("'self'"));
   assert.ok(imgSrc.includes('data:'));
   assert.ok(imgSrc.includes('https://*.tile.openstreetmap.org'));
+  assert.ok(imgSrc.includes('https://server.arcgisonline.com'));
   // An arbitrary image URL is an exfiltration channel, so every source here
   // must be one the panel could not have chosen.
   for (const source of imgSrc.replace('img-src ', '').split(' ')) {
@@ -82,6 +83,7 @@ test('tile hosts are reachable by fetch, not just by <img>', () => {
   for (const host of [
     'https://tile.openstreetmap.org',
     'https://*.tile.openstreetmap.org',
+    'https://server.arcgisonline.com',
   ]) {
     assert.ok(directive('img-src').includes(host), `img-src ${host}`);
     assert.ok(connectSrc.includes(host), `connect-src ${host}`);
