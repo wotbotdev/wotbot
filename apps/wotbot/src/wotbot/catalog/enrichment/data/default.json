@@ -1,5 +1,5 @@
 {
-  "system_prompt_extra": "",
+  "thing_enrichment_system_prompt_extra": "",
   "ontologies": [
     {
       "prefix": "sosa",

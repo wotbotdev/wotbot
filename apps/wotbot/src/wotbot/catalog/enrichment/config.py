@@ -19,7 +19,7 @@ class OntologyConfig(BaseModel):
 
 class EnrichmentConfig(BaseModel):
     ontologies: list[OntologyConfig]
-    system_prompt_extra: str = ""
+    thing_enrichment_system_prompt_extra: str = ""
     # Path to an external SHACL shapes Turtle file. Empty -> packaged defaults.
     shapes: str = ""
 
@@ -31,11 +31,11 @@ def load_enrichment_config(path: str = "") -> EnrichmentConfig:
     With no ``path`` the packaged ``default.json`` is used verbatim. When ``path``
     is set, that file is treated as an *overlay* onto the packaged default: keys
     it provides win, keys it omits are inherited. This lets a deployment (e.g. a
-    demo) override just ``system_prompt_extra`` while keeping the packaged
-    ontology stack, whose ``terms``/``shapes`` keep resolving as packaged
-    resources. Keys the override *does* provide are resolved relative to the
-    override file (``terms``/``shapes`` become absolute), so they are read from
-    disk rather than the package.
+    demo) override just ``thing_enrichment_system_prompt_extra`` while keeping
+    the packaged ontology stack, whose ``terms``/``shapes`` keep resolving as
+    packaged resources. Keys the override *does* provide are resolved relative
+    to the override file (``terms``/``shapes`` become absolute), so they are read
+    from disk rather than the package.
 
     ``ontologies`` merge *by prefix* rather than replacing wholesale: an override
     entry whose prefix matches a packaged one replaces just that ontology, and a
@@ -53,8 +53,10 @@ def load_enrichment_config(path: str = "") -> EnrichmentConfig:
 
     payload: dict[str, Any] = dict(default_payload)
 
-    if "system_prompt_extra" in override:
-        payload["system_prompt_extra"] = override["system_prompt_extra"]
+    if "thing_enrichment_system_prompt_extra" in override:
+        payload["thing_enrichment_system_prompt_extra"] = override[
+            "thing_enrichment_system_prompt_extra"
+        ]
 
     if "ontologies" in override:
         # Merge deployment ontologies onto the packaged core by prefix: a matching

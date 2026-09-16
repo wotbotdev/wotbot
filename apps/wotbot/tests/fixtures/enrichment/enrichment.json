@@ -1,5 +1,5 @@
 {
-  "system_prompt_extra": "Synthetic test deployment: prefer the wotbot.test dev/ts/env vocabularies when they clearly match the TD.",
+  "thing_enrichment_system_prompt_extra": "Synthetic test deployment: prefer the wotbot.test dev/ts/env vocabularies when they clearly match the TD.",
   "ontologies": [
     {
       "prefix": "dev",

@@ -790,12 +790,15 @@ def make_background_job_node(
     max_tokens: int,
     *,
     parallel_tool_calls: bool = True,
+    response_instructions: str = "",
 ):
     # ``config`` typing must stay ``Optional[RunnableConfig]``; see _make_llm_node.
     # Background job runs don't expose a reasoning-effort selector (see
     # WotbotState.reasoning_effort docstring), so this always binds without one.
     async def node(state: WotbotState, config: Optional[RunnableConfig] = None):
-        system_message = SystemMessage(content=BACKGROUND_JOB_PROMPT + _current_time_block())
+        system_message = SystemMessage(
+            content=BACKGROUND_JOB_PROMPT + response_instructions + _current_time_block()
+        )
         trimmed = _trim_conversation(state["messages"], max_tokens)
         runnable = _prepare_branch_runnable(
             llm,

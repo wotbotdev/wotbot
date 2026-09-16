@@ -72,5 +72,6 @@ def compile_graph(settings: Settings, checkpointer: Any):
         parallel_tool_calls=settings.parallel_tool_calls,
         camera_frames_enabled=settings.openai_model_supports_vision,
         voice_mode=True,
+        agent_system_prompt_extra=settings.agent_system_prompt_extra,
     )
     return graph.with_config(recursion_limit=settings.recursion_limit)

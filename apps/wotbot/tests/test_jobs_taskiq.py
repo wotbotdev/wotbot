@@ -208,7 +208,12 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         graph = _FakeGraph()
-        runner = BackgroundAgentRunner(Settings(openai_api_key="test"))
+        runner = BackgroundAgentRunner(
+            Settings(
+                openai_api_key="test",
+                agent_system_prompt_extra="deployment guidance",
+            )
+        )
         saver = SimpleNamespace(setup=AsyncMock(), adelete_thread=AsyncMock())
         saver_context = _FakeSaverContext(saver)
         conninfo_values = []
@@ -255,6 +260,10 @@ class BackgroundAgentRunnerTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(conninfo_values, ["conninfo"])
         saver.setup.assert_awaited_once()
         self.assertIs(build_job_graph.call_args.kwargs["checkpointer"], saver)
+        self.assertEqual(
+            build_job_graph.call_args.kwargs["agent_system_prompt_extra"],
+            "deployment guidance",
+        )
         self.assertTrue(saver_context.closed)
         self.assertEqual(graph.configs, [])
         local_tool_names = {tool.name for tool in build_job_graph.call_args.kwargs["local_tools"]}

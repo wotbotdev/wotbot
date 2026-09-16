@@ -1,5 +1,6 @@
 import inspect
 import logging
+import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -17,13 +18,15 @@ from wotbot.agent.nodes import (
     _sanitize_message_sequence,
     _strip_ui_tool_data,
     make_analysis_node,
+    make_background_job_node,
     make_control_node,
+    make_discovery_node,
     make_jobs_node,
     make_respond_node,
     make_router_node,
     make_virtual_things_node,
 )
-from wotbot.core.settings import ReasoningEffortSettings, ReasoningEffortStyle
+from wotbot.core.settings import ReasoningEffortSettings, ReasoningEffortStyle, Settings
 
 
 def _tool(name: str) -> SimpleNamespace:
@@ -572,15 +575,30 @@ class RouterObservabilityTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(config["metadata"], {"existing": "preserved"})
 
 
-class VoiceResponseInstructionsTestCase(unittest.IsolatedAsyncioTestCase):
-    async def test_response_instructions_reach_every_foreground_branch(self) -> None:
-        marker = "VOICE RESPONSE MARKER"
+class SystemPromptExtensionTestCase(unittest.IsolatedAsyncioTestCase):
+    def test_multiline_environment_value_is_preserved(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"AGENT_SYSTEM_PROMPT_EXTRA": "first line\nsecond line"},
+            clear=True,
+        ):
+            settings = Settings(_env_file=None)
+
+        self.assertEqual(
+            settings.agent_system_prompt_extra,
+            "first line\nsecond line",
+        )
+
+    async def test_response_instructions_reach_every_user_facing_branch(self) -> None:
+        marker = "SYSTEM PROMPT EXTRA MARKER"
         factories = (
             make_respond_node,
             make_control_node,
             make_analysis_node,
             make_jobs_node,
             make_virtual_things_node,
+            make_discovery_node,
+            make_background_job_node,
         )
 
         for factory in factories:

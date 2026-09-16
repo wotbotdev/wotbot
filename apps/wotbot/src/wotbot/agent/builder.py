@@ -27,6 +27,13 @@ from wotbot.agent.tools.route_to import make_route_to_tool
 from wotbot.core.settings import ReasoningEffortSettings
 
 
+def _agent_prompt_extra(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    return f"\n\n## Deployment-specific guidance\n{value}\n"
+
+
 def _tool_error_message(error: Exception) -> str:
     return f"Tool error: {error}"
 
@@ -103,11 +110,14 @@ def build_graph(
     handoff_enabled: bool = False,
     reasoning_effort: ReasoningEffortSettings | None = None,
     voice_mode: bool = False,
+    agent_system_prompt_extra: str = "",
 ):
     """Build and compile the wotbot agent StateGraph."""
     registry_tool_groups = partition_registry_tools(registry_tools)
     local_tool_groups = group_local_tools(local_tools)
-    response_instructions = VOICE_RESPONSE_PROMPT if voice_mode else ""
+    response_instructions = _agent_prompt_extra(agent_system_prompt_extra)
+    if voice_mode:
+        response_instructions += VOICE_RESPONSE_PROMPT
 
     web_interface_tools = (
         [local_tool_groups.create_web_interface] if local_tool_groups.create_web_interface else []
@@ -299,6 +309,7 @@ def build_background_job_graph(
     max_tokens: int,
     checkpointer=None,
     parallel_tool_calls: bool = True,
+    agent_system_prompt_extra: str = "",
 ):
     """Build and compile the compact graph used by background prompt jobs."""
     registry_tool_groups = partition_registry_tools(registry_tools)
@@ -325,6 +336,7 @@ def build_background_job_graph(
             job_tools,
             max_tokens,
             parallel_tool_calls=parallel_tool_calls,
+            response_instructions=_agent_prompt_extra(agent_system_prompt_extra),
         ),
     )
     graph.add_node(

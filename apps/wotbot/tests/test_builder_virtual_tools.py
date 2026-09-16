@@ -2,7 +2,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from wotbot.agent.builder import build_graph
+from wotbot.agent.builder import _agent_prompt_extra, build_graph
 
 
 def _tool(name: str) -> SimpleNamespace:
@@ -10,6 +10,13 @@ def _tool(name: str) -> SimpleNamespace:
 
 
 class BuilderVirtualToolsTestCase(unittest.TestCase):
+    def test_agent_prompt_extra_is_normalized_as_a_static_section(self) -> None:
+        self.assertEqual(_agent_prompt_extra("  "), "")
+        self.assertEqual(
+            _agent_prompt_extra("  first line\nsecond line  "),
+            "\n\n## Deployment-specific guidance\nfirst line\nsecond line\n",
+        )
+
     def test_virtual_branch_gets_dedicated_tools_and_catalog_mutation_is_excluded(
         self,
     ) -> None:

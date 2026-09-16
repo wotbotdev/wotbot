@@ -175,7 +175,7 @@ def _system_prompt(config: EnrichmentConfig, vocabulary: Vocabulary) -> str:
         "for numeric properties. If you assign a measurement semantic type to a numeric "
         f"property, you must also set unit_iri when a matching unit is clear. {unit_guidance}"
         "Include short rationales for each annotation.\n"
-        f"{config.system_prompt_extra}\n\n"
+        f"{config.thing_enrichment_system_prompt_extra}\n\n"
         f"Allowed vocabulary:\n{vocabulary.prompt_terms()}"
     )
 

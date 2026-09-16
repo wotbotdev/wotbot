@@ -64,7 +64,12 @@ class AgentAppRoutesTestCase(unittest.TestCase):
 
         fake_saver = object()
         fake_graph = FakeGraph()
-        fake_settings = Settings(agent_handoff_enabled=True, a2a_enabled=False, mcp_enabled=False)
+        fake_settings = Settings(
+            agent_handoff_enabled=True,
+            agent_system_prompt_extra="deployment guidance",
+            a2a_enabled=False,
+            mcp_enabled=False,
+        )
         fake_job_service = AsyncMock()
 
         async def exercise() -> None:
@@ -91,6 +96,10 @@ class AgentAppRoutesTestCase(unittest.TestCase):
                     self.assertIs(wotbot_app.app.state.agent_settings, fake_settings)
                     self.assertIs(build_graph.call_args.kwargs["checkpointer"], fake_saver)
                     self.assertTrue(build_graph.call_args.kwargs["handoff_enabled"])
+                    self.assertEqual(
+                        build_graph.call_args.kwargs["agent_system_prompt_extra"],
+                        "deployment guidance",
+                    )
                     fake_job_service.start.assert_awaited_once()
                 fake_job_service.stop.assert_awaited_once()
 

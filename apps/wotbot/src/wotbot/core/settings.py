@@ -235,6 +235,10 @@ class Settings(BaseSettings):
     recursion_limit: int = 50
     max_context_tokens: int = 120000
     parallel_tool_calls: bool = False
+    # Trusted deployment-specific guidance appended to every user-facing agent
+    # system prompt. Kept static for the lifetime of the process so provider
+    # prompt-prefix caching remains effective.
+    agent_system_prompt_extra: str = ""
     # When enabled, action branches (control/analysis/jobs/virtual_things) may
     # hand off to one another via the route_to tool instead of ending. Off by
     # default: the compiled graph is identical to the single-branch graph.

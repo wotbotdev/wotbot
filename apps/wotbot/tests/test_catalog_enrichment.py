@@ -380,14 +380,14 @@ def test_overlay_inherits_packaged_ontologies_when_override_omits_them(tmp_path)
     packaged = load_enrichment_config()
     config_file = tmp_path / "enrichment.json"
     config_file.write_text(
-        json.dumps({"system_prompt_extra": "custom demo bias"}),
+        json.dumps({"thing_enrichment_system_prompt_extra": "custom demo bias"}),
         encoding="utf-8",
     )
 
     config = load_enrichment_config(str(config_file))
 
     # The override wins for the key it provides...
-    assert config.system_prompt_extra == "custom demo bias"
+    assert config.thing_enrichment_system_prompt_extra == "custom demo bias"
     # ...and inherits the packaged ontology stack for the keys it omits.
     assert [o.prefix for o in config.ontologies] == [o.prefix for o in packaged.ontologies]
     assert config.shapes == packaged.shapes
@@ -418,8 +418,10 @@ def test_overlay_ontologies_merge_onto_packaged_by_prefix(tmp_path):
     first_core = packaged.ontologies[0]
     merged_core = next(o for o in config.ontologies if o.prefix == first_core.prefix)
     assert merged_core.terms == first_core.terms
-    # system_prompt_extra was omitted -> inherited from the packaged default.
-    assert config.system_prompt_extra == packaged.system_prompt_extra
+    # The prompt extension was omitted -> inherited from the packaged default.
+    assert (
+        config.thing_enrichment_system_prompt_extra == packaged.thing_enrichment_system_prompt_extra
+    )
 
 
 def test_overlay_ontology_with_existing_prefix_overrides_core(tmp_path):

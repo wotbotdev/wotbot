@@ -212,7 +212,10 @@ def test_livekit_voice_graph_filters_tool_and_router_output_chunks() -> None:
 
 
 def test_livekit_graph_enables_voice_response_mode() -> None:
-    settings = Settings(openai_api_key="test-key")
+    settings = Settings(
+        openai_api_key="test-key",
+        agent_system_prompt_extra="deployment guidance",
+    )
     checkpointer = object()
     compiled_graph = MagicMock()
     configured_graph = object()
@@ -229,6 +232,7 @@ def test_livekit_graph_enables_voice_response_mode() -> None:
 
     assert result is configured_graph
     assert build_graph.call_args.kwargs["voice_mode"] is True
+    assert build_graph.call_args.kwargs["agent_system_prompt_extra"] == "deployment guidance"
 
 
 def test_voice_final_text_skips_device_summary_marker() -> None:

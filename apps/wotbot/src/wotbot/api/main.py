@@ -136,6 +136,7 @@ async def lifespan(app: FastAPI):
                 camera_frames_enabled=settings.openai_model_supports_vision,
                 handoff_enabled=settings.agent_handoff_enabled,
                 reasoning_effort=reasoning_effort if reasoning_effort.enabled else None,
+                agent_system_prompt_extra=settings.agent_system_prompt_extra,
             )
             graph = graph.with_config(recursion_limit=settings.recursion_limit)
             app.state.graph = graph

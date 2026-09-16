@@ -96,6 +96,7 @@ class BackgroundAgentRunner:
             max_tokens=self._settings.max_context_tokens,
             checkpointer=self._checkpointer,
             parallel_tool_calls=self._settings.parallel_tool_calls,
+            agent_system_prompt_extra=self._settings.agent_system_prompt_extra,
         )
         self._graph = graph
         return self._graph
