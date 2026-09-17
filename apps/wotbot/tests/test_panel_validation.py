@@ -110,6 +110,28 @@ def test_markup_outside_scripts_is_not_parsed_as_code():
     assert validate_panel("<p>a ( b { c</p>", []) == []
 
 
+# --- unverifiable subresource integrity -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        '<link rel="stylesheet" href="https://unpkg.com/x.css" integrity="sha256-wrong">',
+        "<script src='https://unpkg.com/x.js' INTEGRITY='sha384-wrong'></script>",
+        '<img src="data:image/png;base64,eA==" integrity>',
+    ],
+)
+def test_integrity_attributes_are_rejected(html):
+    problems = validate_panel(html, [])
+    assert len(problems) == 1
+    assert "Remove every integrity attribute" in problems[0]
+
+
+def test_integrity_text_is_not_mistaken_for_an_attribute():
+    html = '<p>Remove integrity="sha256-example" from the tag.</p>'
+    assert validate_panel(html, []) == []
+
+
 # --- bridge calls ----------------------------------------------------------
 
 

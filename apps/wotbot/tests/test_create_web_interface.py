@@ -91,6 +91,21 @@ class CreateWebInterfaceToolTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertIn("urn:other", result["error"])
         self.assertNotIn("html", self._captured)
 
+    async def test_rejects_an_unverifiable_integrity_attribute(self) -> None:
+        result = await create_web_interface.ainvoke(
+            {
+                "html": (
+                    '<link rel="stylesheet" href="https://unpkg.com/leaflet.css" '
+                    'integrity="sha256-invented">'
+                ),
+                "capabilities": [{"thing_id": "urn:lamp", "ops": ["readProperty"]}],
+            }
+        )
+
+        self.assertIn("error", result)
+        self.assertIn("Remove every integrity attribute", result["error"])
+        self.assertNotIn("html", self._captured)
+
     async def test_rejects_interface_without_valid_capabilities(self) -> None:
         result = await create_web_interface.ainvoke(
             {

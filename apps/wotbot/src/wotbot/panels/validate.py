@@ -197,11 +197,38 @@ def validate_panel(
     parsed = [(script, _parse_js(script.source)) for script in extract_scripts(html)]
 
     problems: list[str] = []
+    problems.extend(_integrity_problems(html))
     problems.extend(_syntax_problems(parsed))
     problems.extend(_capability_problems(declared, thing_affordances or {}))
     problems.extend(_bridge_call_problems(parsed, declared))
     problems.extend(_egress_problems(parsed))
     return problems
+
+
+def _integrity_problems(html: str) -> list[str]:
+    """Reject unverifiable SRI hashes authored from model memory.
+
+    A wrong ``integrity`` value makes the browser discard an otherwise valid
+    CDN resource.  Panel generation has no network access with which to verify
+    the bytes behind a URL, so accepting a model-supplied hash turns a typo into
+    a broken interface.  The panel CSP already restricts which CDN hosts may
+    serve dependencies; generated panels should rely on that allowlist instead.
+    """
+    tree = _parse_html(html)
+    for node in _walk(tree.root_node):
+        if node.type != "attribute":
+            continue
+        name = next((child for child in node.children if child.type == "attribute_name"), None)
+        if _text(name).lower() == "integrity":
+            return [
+                (
+                    "The panel includes an integrity attribute that cannot be verified "
+                    "during generation. A wrong hash makes the browser block the CDN "
+                    "resource. Remove every integrity attribute and rely on the panel "
+                    "CSP's CDN allowlist instead."
+                )
+            ]
+    return []
 
 
 def _syntax_problems(parsed: list[tuple[PanelScript, Tree]]) -> list[str]:

@@ -60,7 +60,9 @@ You may load CDN libraries (charting/icons/fonts from jsdelivr/unpkg/cdnjs/Googl
 Fonts) for a richer UI, but never use fetch/XHR/WebSocket — all network egress is
 blocked; only window.wot reaches registered Things. Declare every Thing affordance the
 interface uses in `capabilities`; interactions outside that allowlist are rejected
-by the UI. The interface renders below the tool call — refer to it naturally as
+by the UI. Do not add `integrity` attributes to CDN tags: hashes recalled from
+memory are unreliable, and panel validation rejects them. The interface renders
+below the tool call — refer to it naturally as
 "the panel above" and never mention raw filenames.
 
 ## Standalone Virtual Things

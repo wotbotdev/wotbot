@@ -163,9 +163,11 @@ async def create_web_interface(
     alongside its JS (Leaflet, for one) works. Maps work too: tiles may come
     from tile.openstreetmap.org. Any other image must be a `data:` URI — an
     arbitrary image URL is blocked by CSP because it would be a way to leak
-    Thing data off the page. You must NOT use fetch/XHR/WebSocket/sendBeacon —
-    all network egress is blocked by CSP; the only way to reach registered Things is
-    `window.wot`. Inline your own CSS/JS.
+    Thing data off the page. Do not add `integrity` attributes to CDN tags:
+    hashes recalled from memory are unreliable, and panel validation rejects
+    them. You must NOT use fetch/XHR/WebSocket/sendBeacon — all network egress
+    is blocked by CSP; the only way to reach registered Things is `window.wot`.
+    Inline your own CSS/JS.
 
     WebGL and WebXR both work in the panel frame: `navigator.xr` is available
     for immersive-vr and immersive-ar sessions (entering one still needs a user
