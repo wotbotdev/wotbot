@@ -18,9 +18,16 @@ class CreateWebInterfaceToolTestCase(unittest.IsolatedAsyncioTestCase):
 
         self._original = web_interface_module._code_executor_client.store_web_artifact
         web_interface_module._code_executor_client.store_web_artifact = fake_store
+        self._original_dependency_validator = web_interface_module.validate_external_dependencies
+
+        async def dependencies_ok(_html: str) -> list[str]:
+            return []
+
+        web_interface_module.validate_external_dependencies = dependencies_ok
 
     def tearDown(self) -> None:
         web_interface_module._code_executor_client.store_web_artifact = self._original
+        web_interface_module.validate_external_dependencies = self._original_dependency_validator
 
     async def test_wraps_html_and_normalizes_capabilities(self) -> None:
         result = await create_web_interface.ainvoke(
@@ -104,6 +111,22 @@ class CreateWebInterfaceToolTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("error", result)
         self.assertIn("Remove every integrity attribute", result["error"])
+        self.assertNotIn("html", self._captured)
+
+    async def test_rejects_unavailable_external_dependency(self) -> None:
+        async def dependency_fails(_html: str) -> list[str]:
+            return ["The external script URL is unavailable (HTTP 404)."]
+
+        web_interface_module.validate_external_dependencies = dependency_fails
+        result = await create_web_interface.ainvoke(
+            {
+                "html": '<script src="https://cdn.jsdelivr.net/npm/example/missing.js"></script>',
+                "capabilities": [{"thing_id": "urn:lamp", "ops": ["readProperty"]}],
+            }
+        )
+
+        self.assertIn("error", result)
+        self.assertIn("HTTP 404", result["error"])
         self.assertNotIn("html", self._captured)
 
     async def test_rejects_interface_without_valid_capabilities(self) -> None:

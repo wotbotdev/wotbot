@@ -21,7 +21,7 @@ from wotbot.clients.code_executor import CodeExecutorClient
 from wotbot.core.database import get_session_factory
 from wotbot.core.settings import Settings
 from wotbot.panels.render import wrap_panel_document
-from wotbot.panels.validate import validate_panel
+from wotbot.panels.validate import validate_external_dependencies, validate_panel
 
 _settings = Settings()
 _code_executor_client = CodeExecutorClient(_settings)
@@ -114,6 +114,7 @@ async def _check_panel(html: str, allowed: list[dict]) -> list[str]:
     thing_ids = [capability["thingId"] for capability in allowed]
     affordances, missing = await _thing_affordances(thing_ids)
     problems = validate_panel(html, allowed, affordances)
+    problems.extend(await validate_external_dependencies(html))
     problems.extend(
         f"No Thing with id '{thing_id}' is registered, so every call against it "
         "fails. Find the right id with things_search."
@@ -160,8 +161,16 @@ async def create_web_interface(
     make a richer UI: cdn.jsdelivr.net, unpkg.com, cdnjs.cloudflare.com,
     cdn.plot.ly, and fonts.googleapis.com / fonts.gstatic.com — scripts, stylesheets, fonts and
     images all load from them, so a library that ships CSS or icon sprites
-    alongside its JS (Leaflet, for one) works. Maps work too: tiles may come
-    from tile.openstreetmap.org. Any other image must be a `data:` URI — an
+    alongside its JS (Leaflet, for one) works. Pin exact versions and use
+    paths that exist in that version. Each `<script type="module">` has its own
+    scope: names it imports are not visible to any other script, so keep the
+    code that uses them in the same module. A bare import such as
+    `import * as THREE from "three"` only resolves through a
+    `<script type="importmap">` mapping it to a CDN URL, placed before the
+    modules that use it; addons that import "three" themselves need that
+    mapping too. Maps work too: tiles may come from tile.openstreetmap.org
+    (including its a/b/c subdomains) or server.arcgisonline.com (Esri World
+    Imagery). Any other image must be a `data:` URI — an
     arbitrary image URL is blocked by CSP because it would be a way to leak
     Thing data off the page. Do not add `integrity` attributes to CDN tags:
     hashes recalled from memory are unreliable, and panel validation rejects
@@ -179,11 +188,11 @@ async def create_web_interface(
     with wot_get_property/wot_get_action first so names and value shapes are
     correct.
 
-    The interface is checked before it is stored: each <script> must parse, every
-    literal window.wot call must be permitted by `capabilities`, and every
-    declared affordance must exist on the Thing. Anything wrong comes back as an
-    error instead of an artifact -- fix it and call this tool again with the
-    complete corrected panel.
+    The interface is checked before it is stored: each <script> must parse,
+    external dependency URLs must resolve, every literal window.wot call must be
+    permitted by `capabilities`, and every declared affordance must exist on the
+    Thing. Anything wrong comes back as an error instead of an artifact -- fix it
+    and call this tool again with the complete corrected panel.
 
     Returns a validated web artifact and its capability allowlist. Describe
     the panel by its title and purpose; how it is opened depends on the calling

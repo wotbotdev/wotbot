@@ -1,8 +1,16 @@
+import asyncio
+import re
+from pathlib import Path
+
+import httpx
 import pytest
 
+from wotbot.panels import validate as validate_module
 from wotbot.panels.validate import (
+    extract_dependencies,
     extract_scripts,
     find_syntax_error,
+    validate_external_dependencies,
     validate_panel,
 )
 
@@ -130,6 +138,254 @@ def test_integrity_attributes_are_rejected(html):
 def test_integrity_text_is_not_mistaken_for_an_attribute():
     html = '<p>Remove integrity="sha256-example" from the tag.</p>'
     assert validate_panel(html, []) == []
+
+
+# --- external dependencies -------------------------------------------------
+
+
+def test_extracts_scripts_modules_and_stylesheets():
+    html = """
+      <link rel="stylesheet" href="https://cdnjs.cloudflare.com/a.css">
+      <script src="https://cdn.plot.ly/a.js"></script>
+      <script type="module">
+        import x from "https://cdn.jsdelivr.net/a.js";
+        import "https://unpkg.com/b.js";
+        import mapped from "x";
+      </script>
+      <script type="importmap">
+        {"imports":{"x":"https://cdn.jsdelivr.net/x.js"},
+         "scopes":{"/":{"y":"https://unpkg.com/y.js"}}}
+      </script>
+    """
+    assert [(item.url, item.kind) for item in extract_dependencies(html)] == [
+        ("https://cdnjs.cloudflare.com/a.css", "stylesheet"),
+        ("https://cdn.plot.ly/a.js", "script"),
+        ("https://cdn.jsdelivr.net/a.js", "module"),
+        ("https://unpkg.com/b.js", "module"),
+    ]
+
+
+def test_unavailable_dependency_is_rejected_for_any_library():
+    def respond(request):
+        assert request.headers["range"] == "bytes=0-0"
+        return httpx.Response(404)
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script src="https://cdn.jsdelivr.net/npm/example/missing.js"></script>',
+            transport=httpx.MockTransport(respond),
+        )
+    )
+    assert len(problems) == 1
+    assert "HTTP 404" in problems[0]
+    assert "example/missing.js" in problems[0]
+
+
+def test_available_dependency_passes():
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script type="module" src="https://unpkg.com/example.js"></script>',
+            transport=httpx.MockTransport(lambda _request: httpx.Response(206)),
+        )
+    )
+    assert problems == []
+
+
+def test_disallowed_dependency_host_is_rejected_without_requesting_it():
+    def must_not_run(_request):
+        raise AssertionError("disallowed hosts must never be contacted")
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script src="https://example.com/library.js"></script>',
+            transport=httpx.MockTransport(must_not_run),
+        )
+    )
+    assert len(problems) == 1
+    assert "cannot load under the panel CSP" in problems[0]
+
+
+def test_redirect_outside_allowlist_is_rejected():
+    def respond(request):
+        return httpx.Response(302, headers={"Location": "https://example.com/library.js"})
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script src="https://unpkg.com/library.js"></script>',
+            transport=httpx.MockTransport(respond),
+        )
+    )
+    assert len(problems) == 1
+    assert "cannot load under the panel CSP" in problems[0]
+
+
+def test_unmapped_bare_import_in_inline_module_is_rejected_without_request():
+    def must_not_run(_request):
+        raise AssertionError("an unresolved bare import must fail before fetching")
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script type="module">import x from "package-name";</script>',
+            transport=httpx.MockTransport(must_not_run),
+        )
+    )
+    assert len(problems) == 1
+    assert "bare module specifier 'package-name'" in problems[0]
+    assert "no matching import-map entry" in problems[0]
+
+
+def test_unmapped_bare_import_inside_downloaded_module_is_rejected():
+    def respond(request):
+        assert request.url.path == "/addon.js"
+        return httpx.Response(200, text='import { x } from "package-name";')
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script type="module" src="https://unpkg.com/addon.js"></script>',
+            transport=httpx.MockTransport(respond),
+        )
+    )
+    assert len(problems) == 1
+    assert "bare module specifier 'package-name'" in problems[0]
+    assert "https://unpkg.com/addon.js" in problems[0]
+
+
+def test_import_map_resolves_bare_imports_across_downloaded_modules():
+    requested = []
+
+    def respond(request):
+        requested.append(str(request.url))
+        if request.url.path == "/addon.js":
+            return httpx.Response(200, text='import { x } from "package-name";')
+        if request.url.path == "/package.js":
+            return httpx.Response(200, text="export const x = 1;")
+        raise AssertionError(f"unexpected dependency: {request.url}")
+
+    html = """
+      <script type="importmap">
+        {"imports":{"package-name":"https://unpkg.com/package.js"}}
+      </script>
+      <script type="module" src="https://unpkg.com/addon.js"></script>
+    """
+    problems = asyncio.run(
+        validate_external_dependencies(html, transport=httpx.MockTransport(respond))
+    )
+    assert problems == []
+    assert requested == ["https://unpkg.com/addon.js", "https://unpkg.com/package.js"]
+
+
+def test_dependency_hosts_match_panel_csp():
+    csp = Path(__file__).resolve().parents[2] / "ui" / "src" / "lib" / "panel-csp.ts"
+    if not csp.exists():
+        pytest.skip("panel CSP source is not part of this checkout")
+    source = csp.read_text()
+
+    def hosts(constant):
+        body = re.search(rf"const {constant} = \[(.*?)\];", source, re.DOTALL).group(1)
+        return set(re.findall(r"'https://([^']+)'", body))
+
+    assert hosts("SCRIPT_CDNS") == validate_module._SCRIPT_HOSTS
+    assert hosts("SCRIPT_CDNS") | hosts("CDN_HOSTS") == validate_module._DEPENDENCY_HOSTS
+
+
+def test_script_from_font_host_is_rejected_but_stylesheet_is_not():
+    html = """
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter">
+      <script src="https://fonts.googleapis.com/library.js"></script>
+    """
+    problems = asyncio.run(
+        validate_external_dependencies(
+            html, transport=httpx.MockTransport(lambda _request: httpx.Response(200))
+        )
+    )
+    assert len(problems) == 1
+    assert "library.js" in problems[0]
+    assert "cannot load under the panel CSP" in problems[0]
+
+
+def test_export_from_is_followed():
+    def respond(request):
+        if request.url.path == "/index.js":
+            return httpx.Response(200, text='export * from "package-name";')
+        raise AssertionError(f"unexpected dependency: {request.url}")
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script type="module" src="https://unpkg.com/index.js"></script>',
+            transport=httpx.MockTransport(respond),
+        )
+    )
+    assert len(problems) == 1
+    assert "bare module specifier 'package-name'" in problems[0]
+
+
+def test_large_module_graph_stops_quietly_at_the_limit():
+    requested = []
+
+    def respond(request):
+        requested.append(request.url.path)
+        index = int(request.url.path.strip("/m.js") or 0)
+        return httpx.Response(200, text=f'import "https://unpkg.com/m{index + 1}.js";')
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script type="module" src="https://unpkg.com/m0.js"></script>',
+            transport=httpx.MockTransport(respond),
+        )
+    )
+    assert problems == []
+    assert len(requested) == validate_module._MAX_DEPENDENCIES
+
+
+def test_redirect_loop_stays_silent():
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script src="https://unpkg.com/a.js"></script>',
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(302, headers={"Location": str(request.url)})
+            ),
+        )
+    )
+    assert problems == []
+
+
+def test_truncated_module_is_not_crawled(monkeypatch):
+    monkeypatch.setattr(validate_module, "_MAX_MODULE_BYTES", 16)
+
+    def respond(request):
+        assert request.headers["range"] == "bytes=0-16"
+        if request.url.path == "/big.js":
+            # A server honouring Range returns limit + 1 bytes of a larger file.
+            return httpx.Response(206, text='import "missing";')
+        raise AssertionError(f"unexpected dependency: {request.url}")
+
+    problems = asyncio.run(
+        validate_external_dependencies(
+            '<script type="module" src="https://unpkg.com/big.js"></script>',
+            transport=httpx.MockTransport(respond),
+        )
+    )
+    assert problems == []
+
+
+def test_deadline_keeps_problems_already_found(monkeypatch):
+    monkeypatch.setattr(validate_module, "_DEPENDENCY_DEADLINE_SECONDS", 0.2)
+
+    async def respond(request):
+        if request.url.path == "/missing.js":
+            return httpx.Response(404)
+        await asyncio.sleep(5)
+        return httpx.Response(200)
+
+    html = """
+      <script src="https://unpkg.com/missing.js"></script>
+      <script type="module" src="https://unpkg.com/slow.js"></script>
+    """
+    problems = asyncio.run(
+        validate_external_dependencies(html, transport=httpx.MockTransport(respond))
+    )
+    assert len(problems) == 1
+    assert "HTTP 404" in problems[0]
 
 
 # --- bridge calls ----------------------------------------------------------
