@@ -4,15 +4,21 @@ The agent authors plain HTML plus JavaScript that drives Things through the
 injected ``window.wot`` bridge (see ``wotbot/panels/wot_bridge.js``). The tool
 wraps that markup into a standalone document, persists it as a code artifact,
 and returns a ``kind: "web"`` artifact plus the capability allowlist the UI must
-enforce. The generated code runs in an opaque-origin sandboxed iframe and can
+enforce. The generated code runs in an isolated-origin sandboxed iframe and can
 ONLY reach the declared Thing affordances via the bridge.
 """
 
 import asyncio
+import logging
+from typing import Annotated
 
 import httpx
 from fastapi import HTTPException
+from langchain_core.runnables import RunnableConfig
+from langgraph.prebuilt import ToolRuntime
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
+from sqlalchemy.exc import SQLAlchemyError
 
 from wotbot.agent.tools.contracts import tool
 from wotbot.catalog.ids import decode_thing_id
@@ -20,11 +26,18 @@ from wotbot.catalog.service import ThingCatalogQueryService
 from wotbot.clients.code_executor import CodeExecutorClient
 from wotbot.core.database import get_session_factory
 from wotbot.core.settings import Settings
+from wotbot.panels.attempts import current_attempt
+from wotbot.panels.browser import validate_in_browser
+from wotbot.panels.data import resolve_data
+from wotbot.panels.evidence import BrowserValidation
 from wotbot.panels.render import wrap_panel_document
+from wotbot.panels.reports import save_report
 from wotbot.panels.validate import validate_external_dependencies, validate_panel
+from wotbot.panels.visual_review import review_visuals
 
 _settings = Settings()
 _code_executor_client = CodeExecutorClient(_settings)
+logger = logging.getLogger(__name__)
 
 # Bridge operations the generated UI may request. Kept in sync with the
 # window.wot surface exposed by wotbot/panels/wot_bridge.js.
@@ -126,13 +139,35 @@ async def _check_panel(html: str, allowed: list[dict]) -> list[str]:
 @tool
 async def create_web_interface(
     html: str,
-    capabilities: list[Capability],
+    config: RunnableConfig,
+    capabilities: list[Capability] | None = None,
     title: str = "",
+    data: dict[str, str] | None = None,
+    runtime: Annotated[ToolRuntime, SkipJsonSchema()] = None,
 ) -> dict:
     """Create an interactive HTML/JS mini-interface (control panel or dashboard).
 
     Use this when the user wants a custom UI to monitor or operate Things,
-    rather than a static chart. Write plain HTML for `html` (body markup plus a
+    or an interactive visualization of saved analysis results.
+    Attach JSON/GeoJSON exports from run_code using `data`, a mapping of short
+    names to returned artifact IDs, e.g. {"areas": "file-...geojson"}.
+    Use the artifact's `id` field, not its display `ref` or `filename`.
+    In JavaScript read the decoded value synchronously with
+    `const areas = window.panelData.read("areas")`; `panelData.names()` lists
+    attachments. Each read returns a fresh copy of the original JSON value.
+    The backend copies the saved bytes directly; NEVER print, retype, compress,
+    or simplify a dataset to put it in HTML. Export with application/json or
+    application/geo+json. Up to 8 attachments / 8 MiB combined are supported.
+    The result returns reusable panel-data IDs and metadata, not the dataset.
+    Reuse these IDs in `data` for subsequent panels or edits; pinned panels keep
+    their snapshots even after source downloads expire. Interfaces using only
+    attached data may omit capabilities. All actual Thing interactions must
+    still be declared. Unknown attachment names throw a visible JS error;
+    handle loading/rendering errors in your UI.
+    During a saved-panel edit, omitting data preserves its current attachments;
+    pass an explicit mapping to replace them or {} to remove all attachments.
+
+    Write plain HTML for `html` (body markup plus a
     <script> with your own JS). Drive Things through the injected `window.wot`
     client:
 
@@ -188,53 +223,202 @@ async def create_web_interface(
     with wot_get_property/wot_get_action first so names and value shapes are
     correct.
 
+    State your own claims as checks. Call the injected `panelChecks` once, at the
+    end of your script, whenever the panel or the message you send with it asserts
+    something factual about the data -- a ranking, a comparison, an extreme, a
+    count -- or whenever a library has to have rendered something for the panel to
+    be of any use:
+
+      await panelChecks({
+        'map has a rendered layer': () => areas.getLayers().length > 0,
+        'ranking is identical at 80m and 100m': () => {
+          const wind = panelData.read('wind');
+          return rankAt(wind, 80).join() === rankAt(wind, 100).join();
+        },
+      });
+
+    A check fails by returning false, null, undefined or NaN, or by throwing, and
+    the message of anything it throws is reported. Read the attachment back inside
+    the check instead of comparing against a number you wrote into the markup:
+    the point is to catch a claim the data does not support, and a check that
+    restates its own answer cannot do that. Two to five checks is usually right.
+    A check that cannot fail is worse than no check at all.
+    When asserting equality, throw an Error with expected and actual values on
+    mismatch. For canvas charts/maps, inspect the library's layers/data rather
+    than counting DOM nodes; canvas markers do not have individual DOM elements.
+
+    For every panel, call panelChecks with at least one assertion
+    AFTER initialization and rendering finish. A real browser waits for this
+    verdict before delivery, checks for runtime errors and blank output, and
+    rejects failed or missing checks. It does not click controls or prove that
+    the displayed claims are correct. Live panels may read declared properties
+    during validation, with real JSON or binary values and uriVariables. Writes,
+    actions and subscriptions are blocked and untested; if initialization attempts
+    them, validation is inconclusive. Keep operations that change devices behind
+    user controls, and use property reads for initial state. The validator allows
+    up to 20 reads with a five-second deadline per read. Validator outages, offline
+    devices and timeouts are inconclusive;
+    do not repeatedly rewrite working code for an infrastructure failure.
+    Each panel gets an initial attempt and at most TWO repair attempts in this
+    user turn, across static, data and browser failures. Create panels one at a
+    time. Respect retry_allowed in the result: false means stop and explain the
+    remaining problem. Inconclusive/unavailable checks stop automatic retries
+    immediately. A new user request can try again. Saved reports and screenshots
+    remain available to the user for 30 days; image bytes never enter this result.
+    A separate visual review annotates screenshots at normal and narrow widths.
+    Its findings are advisory: a delivered artifact is final for this request.
+    Mention any visual warnings or unavailable review; do not regenerate a panel
+    automatically just for these warnings or an unavailable visual reviewer.
+
     The interface is checked before it is stored: each <script> must parse,
     external dependency URLs must resolve, every literal window.wot call must be
     permitted by `capabilities`, and every declared affordance must exist on the
     Thing. Anything wrong comes back as an error instead of an artifact -- fix it
     and call this tool again with the complete corrected panel.
 
-    Returns a validated web artifact and its capability allowlist. Describe
+    Returns a web artifact, its validation coverage and capability allowlist. Describe
     the panel by its title and purpose; how it is opened depends on the calling
     interface.
     """
-    allowed = _normalize_capabilities(capabilities)
-    if not allowed:
-        return {
-            "error": (
-                "Refusing to create an interface with no valid capabilities. "
-                "Declare at least one thing_id with allowed ops."
-            )
+    attempt = (
+        current_attempt(runtime.state.get("messages", []), runtime.tool_call_id)
+        if runtime
+        else current_attempt([], "")
+    )
+    if attempt.blocked:
+        reasons = {
+            "parallel": "Create panels one at a time; wait for the current panel result before submitting another.",
+            "exhausted": "Panel repair limit reached (initial attempt plus two repairs). Stop rewriting and explain the remaining errors to the user.",
+            "inconclusive": "The previous validation was inconclusive or unavailable. Stop automatic retries and explain the diagnostics; a new user request can try again.",
         }
+        return {
+            "error": reasons[attempt.blocked],
+            "panel_retry": {"counted": False},
+            "browser_validation": {
+                "status": "blocked",
+                **attempt.metadata(),
+                "report_id": attempt.previous_reports[-1] if attempt.previous_reports else None,
+            },
+        }
+
+    document = html
+
+    async def finish(validation: BrowserValidation, artifacts: list | None = None):
+        report = {
+            **validation.model_dump(),
+            **attempt.metadata(retry_allowed=validation.status == "failed" and runtime is not None),
+        }
+        try:
+            report = await save_report(
+                title=title,
+                document=document,
+                thread_id=config.get("configurable", {}).get("thread_id"),
+                report=report,
+                screenshot_base64=validation.screenshot_base64,
+                narrow_screenshot_base64=validation.narrow_screenshot_base64,
+            )
+        except (SQLAlchemyError, ValueError, OSError):
+            logger.exception("Could not save panel validation evidence")
+            report = {
+                **report,
+                "status": "unavailable",
+                "retry_allowed": False,
+                "diagnostics": [
+                    {
+                        "kind": "report_storage",
+                        "message": "Could not save validation evidence. No panel was delivered.",
+                    }
+                ],
+            }
+            artifacts = None
+        if artifacts:
+            return {"browser_validation": report, "artifacts": artifacts}
+        guidance = (
+            "Fix the reported problems and submit the complete corrected panel."
+            if report["retry_allowed"]
+            else "Stop automatic retries and explain the remaining problem to the user."
+        )
+        diagnostics = "\n".join(item["message"] for item in report.get("diagnostics", []))
+        return {
+            "error": f"Panel validation {report['status']}; no panel was delivered. {guidance}\n{diagnostics}",
+            "browser_validation": report,
+        }
+
+    if data is None:
+        data = config.get("configurable", {}).get("panel_data", {})
+    allowed = _normalize_capabilities(capabilities or [])
+    if not allowed and not data:
+        return await finish(
+            BrowserValidation(
+                status="failed",
+                diagnostics=[
+                    {
+                        "kind": "capabilities",
+                        "message": (
+                            "Declare Thing capabilities or attach saved JSON data. "
+                            "An interface needs at least one valid capability or data attachment."
+                        ),
+                    }
+                ],
+            )
+        )
 
     problems = await _check_panel(html, allowed)
     if problems:
-        return {
-            "error": (
-                "This interface would not work as written, so it was not created:\n"
-                + "\n".join(f"- {problem}" for problem in problems)
-                + "\nFix these and call create_web_interface again with the "
-                "complete corrected panel."
+        return await finish(
+            BrowserValidation(
+                status="failed",
+                diagnostics=[{"kind": "static", "message": problem} for problem in problems],
             )
-        }
+        )
 
-    document = wrap_panel_document(html, title)
     try:
+        data_refs, contents, metadata = await resolve_data(data, _code_executor_client)
+        document = wrap_panel_document(html, title, data=contents)
+        validation = await validate_in_browser(document, _settings, capabilities=allowed)
+        validation.visual_review = await review_visuals(validation, _settings)
+        if validation.status != "passed":
+            return await finish(validation)
         filename = await _code_executor_client.store_web_artifact(html=document)
-    except httpx.ConnectError:
-        return {"error": "Code executor service is unavailable. Please try again later."}
-    except httpx.TimeoutException:
-        return {"error": "Code executor request timed out while storing the interface."}
+    except ValueError as exc:
+        return await finish(
+            BrowserValidation(status="failed", diagnostics=[{"kind": "data", "message": str(exc)}])
+        )
+    except httpx.RequestError:
+        return await finish(
+            BrowserValidation(
+                status="unavailable",
+                diagnostics=[
+                    {
+                        "kind": "executor",
+                        "message": "Code executor request failed while loading panel data or storing the interface.",
+                    }
+                ],
+            )
+        )
     except httpx.HTTPStatusError as e:
-        return {"error": f"Failed to store interface (status {e.response.status_code})."}
+        return await finish(
+            BrowserValidation(
+                status="unavailable",
+                diagnostics=[
+                    {
+                        "kind": "executor",
+                        "message": f"Failed to load panel data or store interface (status {e.response.status_code}).",
+                    }
+                ],
+            )
+        )
 
-    return {
-        "artifacts": [
+    return await finish(
+        validation,
+        [
             {
                 "ref": "ui_1",
                 "kind": "web",
                 "filename": filename,
                 "capabilities": allowed,
+                "data": data_refs,
+                "data_metadata": metadata,
             }
-        ]
-    }
+        ],
+    )

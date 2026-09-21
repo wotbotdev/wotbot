@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from wotbot.core.time import utc_now
+from wotbot.panels.data import data_contents, load_data, prune_data, validate_data_refs
 from wotbot.panels.models import Panel, PanelVersion
 
 VersionSource = str
@@ -26,6 +27,7 @@ def _serialize(panel: Panel, *, include_html: bool = False) -> dict[str, Any]:
         "id": panel.id,
         "title": panel.title,
         "capabilities": panel.capabilities,
+        "data": panel.data or {},
         "source_thread_id": panel.source_thread_id,
         "created_at": panel.created_at.isoformat() if panel.created_at else None,
         "updated_at": panel.updated_at.isoformat() if panel.updated_at else None,
@@ -47,6 +49,7 @@ def _serialize_version(
         "source": version.source,
         "title": version.title,
         "capabilities": version.capabilities,
+        "data": version.data or {},
         "created_at": version.created_at.isoformat() if version.created_at else None,
     }
     if include_html:
@@ -69,6 +72,7 @@ class PanelService:
         html: str,
         capabilities: list[dict[str, Any]],
         source_thread_id: str | None,
+        data: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(html, str) or not html.strip():
             raise HTTPException(status_code=422, detail="html must not be empty")
@@ -77,6 +81,7 @@ class PanelService:
             title=title or "Untitled panel",
             html=html,
             capabilities=_clean_capabilities(capabilities),
+            data=self._retain_data(data),
             source_thread_id=source_thread_id,
         )
         self._session.add(panel)
@@ -89,17 +94,21 @@ class PanelService:
     def get_panel(self, panel_id: str, *, include_html: bool = False) -> dict[str, Any]:
         return _serialize(self._get_or_404(panel_id), include_html=include_html)
 
-    def get_render_payload(self, panel_id: str) -> tuple[str, str]:
+    def get_render_payload(self, panel_id: str) -> tuple[str, str, dict[str, str]]:
+        """Read markup and its attachment references from the same panel revision."""
         panel = self._get_or_404(panel_id)
-        return panel.html, panel.title
+        try:
+            return panel.html, panel.title, data_contents(self._session, panel.data)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    def get_render_payload_with_capabilities(self, panel_id: str) -> dict[str, Any]:
-        panel = self._get_or_404(panel_id)
-        return {
-            "html": panel.html,
-            "title": panel.title,
-            "capabilities": panel.capabilities or [],
-        }
+    def _retain_data(self, data: dict[str, str] | None) -> dict[str, str]:
+        try:
+            refs = validate_data_refs(data)
+            load_data(self._session, refs, retain=True)
+            return refs
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     def update_panel(
         self,
@@ -108,12 +117,14 @@ class PanelService:
         title: str | None = None,
         html: str | None = None,
         capabilities: list[dict[str, Any]] | None = None,
+        data: dict[str, str] | None = None,
         version_source: VersionSource = "manual",
     ) -> dict[str, Any]:
         panel = self._get_or_404(panel_id)
         next_title = panel.title
         next_html = panel.html
         next_capabilities = panel.capabilities or []
+        next_data = panel.data or {}
 
         if title is not None and title.strip():
             next_title = title.strip()
@@ -123,11 +134,14 @@ class PanelService:
             next_html = html
         if capabilities is not None:
             next_capabilities = _clean_capabilities(capabilities)
+        if data is not None:
+            next_data = self._retain_data(data)
 
         if (
             next_title == panel.title
             and next_html == panel.html
             and next_capabilities == (panel.capabilities or [])
+            and next_data == (panel.data or {})
         ):
             return _serialize(panel)
 
@@ -135,6 +149,7 @@ class PanelService:
         panel.title = next_title
         panel.html = next_html
         panel.capabilities = next_capabilities
+        panel.data = next_data
         panel.updated_at = utc_now()
         self._append_version(panel, source=version_source)
         self._session.commit()
@@ -160,12 +175,14 @@ class PanelService:
             panel.title == version.title
             and panel.html == version.html
             and (panel.capabilities or []) == (version.capabilities or [])
+            and (panel.data or {}) == (version.data or {})
         ):
             return _serialize(panel)
 
         panel.title = version.title
         panel.html = version.html
         panel.capabilities = version.capabilities or []
+        panel.data = self._retain_data(version.data)
         panel.updated_at = utc_now()
         self._append_version(panel, source="restore")
         self._session.commit()
@@ -174,7 +191,15 @@ class PanelService:
 
     def delete_panel(self, panel_id: str) -> None:
         panel = self._get_or_404(panel_id)
+        candidates = set((panel.data or {}).values())
+        for data in self._session.scalars(
+            select(PanelVersion.data).where(PanelVersion.panel_id == panel_id)
+        ):
+            candidates.update((data or {}).values())
         self._session.delete(panel)
+        self._session.flush()
+        if candidates:
+            prune_data(self._session, candidates)
         self._session.commit()
 
     def _get_or_404(self, panel_id: str) -> Panel:
@@ -204,6 +229,7 @@ class PanelService:
             title=panel.title,
             html=panel.html,
             capabilities=panel.capabilities or [],
+            data=panel.data or {},
         )
         self._session.add(version)
         return version

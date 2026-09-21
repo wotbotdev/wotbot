@@ -90,9 +90,9 @@ def _strip_ui_tool_data(message: BaseMessage) -> BaseMessage:
     """Remove UI-only tool data from the copy sent to the LLM.
 
     ``wot_calls`` are only needed by the UI to render device-interaction
-    summaries. File storage IDs and URIs are used by download cards, but are
-    not browser links the model should include in its answer. These fields
-    stay in the persisted graph state so the frontend still receives them.
+    summaries. Artifact IDs remain available for follow-up tool calls such as
+    panel data attachments. Storage URIs are not browser links and stay only
+    in the persisted graph state for the frontend's download cards.
     """
     if not isinstance(message, ToolMessage):
         return message
@@ -108,7 +108,7 @@ def _strip_ui_tool_data(message: BaseMessage) -> BaseMessage:
     stripped = {k: v for k, v in parsed.items() if k != "wot_calls"}
     if message.name == "run_code" and isinstance(parsed.get("artifacts"), list):
         stripped["artifacts"] = [
-            {k: v for k, v in artifact.items() if k not in {"id", "uri", "content_uri"}}
+            {k: v for k, v in artifact.items() if k not in {"uri", "content_uri"}}
             if isinstance(artifact, dict) and artifact.get("kind") == "file"
             else artifact
             for artifact in parsed["artifacts"]

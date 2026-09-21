@@ -44,6 +44,15 @@ or other nested fields only when the inspected schema says the decoded value has
 those fields. Binary values are returned as `{ kind: "binary", contentType,
 bodyBase64, sizeBytes }`; use wot.binaryToBlob or wot.binaryToObjectUrl for
 images/media and wot.binaryToBytes for byte-level parsing.
+For interactive visualizations of computed results, export JSON/GeoJSON with
+save_artifact and attach the returned ID through create_web_interface.data.
+The panel reads the original data with window.panelData.read(name); never copy
+datasets through stdout or simplify geometry just to transfer it into HTML.
+When the panel or the message you send with it states something factual about the
+data -- a ranking, a comparison, an extreme, a count -- express that claim as a
+check through panelChecks, reading the attachment back rather than restating a
+number you already wrote, so a claim the data does not support fails instead of
+being delivered.
 
 ## Discovery Tool Choice
 Use things_search when matching on meaning, fuzzy descriptions, location or asset labels, or

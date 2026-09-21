@@ -190,6 +190,17 @@ function convertThreadMessages(
   // Lets a `tool` message find the call it answers, however many assistant
   // messages back that was.
   const callsById = new Map<string, ToolCallPart>();
+  // Replays/retries can reuse a provider ID for separate executions. Keep
+  // joining results by that wire ID, but give every rendered part its own
+  // stable key (including synthetic artifact and device-summary parts).
+  const partIds = new Set<string>();
+  const uniquePartId = (id: string): string => {
+    let candidate = id;
+    let occurrence = 1;
+    while (partIds.has(candidate)) candidate = `${id}:${++occurrence}`;
+    partIds.add(candidate);
+    return candidate;
+  };
   // The assistant turn being assembled. A turn arrives as several LangChain
   // messages -- one per agent step -- but becomes a single message here, so
   // reasoning, tool calls and the final answer keep their true order and
@@ -226,7 +237,7 @@ function convertThreadMessages(
         ) {
           pending.push({
             type: 'tool-call',
-            toolCallId: `artifact:${part.toolCallId}`,
+            toolCallId: uniquePartId(`artifact:${part.toolCallId}`),
             toolName: ARTIFACT_VIEW_NAME,
             args: { source: part.toolName, sourceArgs: part.args },
             result: part.result,
@@ -289,7 +300,7 @@ function convertThreadMessages(
       if (interactions.length > 0) {
         turnParts(message.id).push({
           type: 'tool-call',
-          toolCallId: `wot:${message.id ?? result.length}`,
+          toolCallId: uniquePartId(`wot:${message.id ?? result.length}`),
           toolName: WOT_SUMMARY_NAME,
           args: { interactions },
         });
@@ -305,6 +316,7 @@ function convertThreadMessages(
       parts.push(...toContentParts(message.content));
       for (const call of toToolCallParts(message)) {
         callsById.set(call.toolCallId, call);
+        call.toolCallId = uniquePartId(call.toolCallId);
         parts.push(call);
       }
       continue;

@@ -1,0 +1,36 @@
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>body{margin:0;font:14px system-ui}#map{height:340px}#status{padding:8px;white-space:normal}</style>
+<div id="map"></div>
+<div id="status" role="status">Reading attachment…</div>
+<script>
+try {
+  const areas = panelData.read('areas');
+  if (JSON.stringify(areas).length <= 2000) throw Error('Fixture must exceed stdout limit');
+  if (window.injected) throw Error('JSON escaped into script execution');
+  const changed = panelData.read('areas');
+  changed.features[0].geometry.coordinates[0][0][0] = 0;
+  if (panelData.read('areas').features[0].geometry.coordinates[0][0][0] === 0) throw Error('Snapshot was mutated');
+  let rejected = false;
+  try { panelData.read('missing'); } catch { rejected = true; }
+  if (!rejected) throw Error('Missing attachment was not rejected');
+  const map = L.map('map');
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors', maxZoom: 19
+  }).addTo(map);
+  const polygons = L.geoJSON(areas, {style: feature => ({color:feature.properties.color})}).addTo(map);
+  map.fitBounds(polygons.getBounds());
+  const actual = polygons.toGeoJSON(false);
+  if (JSON.stringify(actual.features) !== JSON.stringify(areas.features)) throw Error('Rendered geometry differs from attachment');
+  window.attachmentChecks = {bytes:JSON.stringify(areas).length, vertices:areas.features[0].geometry.coordinates[0].length,
+    holes:areas.features[0].geometry.coordinates.length-1, exactGeometry:true, immutableSnapshot:true};
+  document.getElementById('status').textContent = 'ALL ATTACHMENT CHECKS PASSED';
+  panelChecks({
+    'exact attached geometry rendered': () => JSON.stringify(polygons.toGeoJSON(false).features) === JSON.stringify(panelData.read('areas').features),
+    'map has visible dimensions': () => map.getSize().x > 0 && map.getSize().y > 0,
+  });
+} catch (error) {
+  document.getElementById('status').textContent = 'FAILED: ' + error.message;
+  throw error;
+}
+</script>

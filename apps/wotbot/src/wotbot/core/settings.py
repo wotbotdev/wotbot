@@ -304,6 +304,10 @@ class Settings(BaseSettings):
 
     # Code Executor
     code_executor_url: str = "http://localhost:8888"
+    panel_validator_url: str = "http://localhost:8919"
+    # Advisory only. Uses the configured endpoint/key in the caller, never Chromium.
+    panel_visual_review_enabled: bool = True
+    panel_visual_review_model: str = ""
     code_executor_timeout_seconds: int = 330
     code_executor_retry_attempts: int = 3
     code_executor_retry_backoff_seconds: float = 1.0

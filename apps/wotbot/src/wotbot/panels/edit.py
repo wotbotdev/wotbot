@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from contextlib import suppress
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -32,6 +33,12 @@ Binary values come back as `{{ kind: "binary", contentType, bodyBase64,
 sizeBytes }}`; use window.wot.binaryToBlob, binaryToObjectUrl, or binaryToBytes
 instead of reading transport envelopes.
 
+Current attached data references (JSON, reuse these IDs in create_web_interface.data):
+{data}
+Read attached values with window.panelData.read(name). Keep these attachments
+unless the requested change removes or replaces them. Do not copy their contents
+into HTML; attachment IDs continue to work after the original download expires.
+
 Requested change:
 {instruction}
 
@@ -43,17 +50,52 @@ Current panel HTML:
 """
 
 
-def _extract_updated_panel(
-    messages: list[Any],
-) -> tuple[str, list[dict[str, Any]]] | None:
-    """Pull the latest create_web_interface html (args) + capabilities (result)."""
+@dataclass
+class PanelEditResult:
+    html: str | None = None
+    capabilities: list[dict[str, Any]] = field(default_factory=list)
+    data: dict[str, str] = field(default_factory=dict)
+    browser_validation: dict[str, Any] | None = None
+
+
+def _extract_edit_result(messages: list[Any]) -> PanelEditResult:
+    """Keep evidence with its matching successful edit, or the last failed attempt."""
     calls_by_id = _create_web_interface_calls_by_id(messages)
-    result: tuple[str, list[dict[str, Any]]] | None = None
+    updated = None
+    failure = PanelEditResult()
     for message in messages:
-        panel = _updated_panel_from_tool_message(message, calls_by_id)
-        if panel is not None:
-            result = panel
-    return result
+        if not isinstance(message, ToolMessage):
+            continue
+        tool_call = calls_by_id.get(message.tool_call_id)
+        if not tool_call:
+            continue
+        result = _tool_result(message.content)
+        validation = result.get("browser_validation")
+        validation = validation if isinstance(validation, dict) else None
+        # A blocked extra call points at the previous attempt's report but has
+        # no diagnostics. Retain the actual attempt rather than that placeholder.
+        if validation and (validation.get("status") != "blocked" or not failure.browser_validation):
+            failure = PanelEditResult(browser_validation=validation)
+        if result.get("error") or (validation and validation.get("status") != "passed"):
+            continue
+        html = (tool_call.get("args") or {}).get("html")
+        artifacts = result.get("artifacts")
+        if not isinstance(html, str) or not html or not isinstance(artifacts, list):
+            continue
+        artifact = next(
+            (item for item in artifacts if isinstance(item, dict) and item.get("kind") == "web"),
+            None,
+        )
+        if artifact is None:
+            continue
+        capabilities, data = artifact.get("capabilities"), artifact.get("data")
+        updated = PanelEditResult(
+            html=html,
+            capabilities=capabilities if isinstance(capabilities, list) else [],
+            data=data if isinstance(data, dict) else {},
+            browser_validation=validation,
+        )
+    return updated or failure
 
 
 def _create_web_interface_calls_by_id(messages: list[Any]) -> dict[str, dict[str, Any]]:
@@ -68,38 +110,15 @@ def _create_web_interface_calls_by_id(messages: list[Any]) -> dict[str, dict[str
     return calls_by_id
 
 
-def _updated_panel_from_tool_message(
-    message: Any,
-    calls_by_id: dict[str, dict[str, Any]],
-) -> tuple[str, list[dict[str, Any]]] | None:
-    if not isinstance(message, ToolMessage):
-        return None
-    tool_call = calls_by_id.get(message.tool_call_id)
-    if not tool_call:
-        return None
-    html = (tool_call.get("args") or {}).get("html")
-    if not isinstance(html, str) or not html:
-        return None
-    artifacts = _tool_message_artifacts(message.content)
-    if not artifacts:
-        return None
-    first_artifact = artifacts[0]
-    if not isinstance(first_artifact, dict):
-        return None
-    capabilities = first_artifact.get("capabilities")
-    return html, capabilities if isinstance(capabilities, list) else []
-
-
-def _tool_message_artifacts(content: Any) -> list[Any]:
+def _tool_result(content: Any) -> dict[str, Any]:
     if isinstance(content, str):
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError:
-            return []
+            return {}
     else:
         parsed = content
-    artifacts = parsed.get("artifacts") if isinstance(parsed, dict) else None
-    return artifacts if isinstance(artifacts, list) else []
+    return parsed if isinstance(parsed, dict) else {}
 
 
 async def run_panel_edit(
@@ -109,18 +128,20 @@ async def run_panel_edit(
     html: str,
     capabilities: list[dict[str, Any]],
     instruction: str,
-) -> tuple[str, list[dict[str, Any]]] | None:
-    """Run one agent turn to edit the panel; returns (new_html, capabilities)."""
+    data: dict[str, str] | None = None,
+) -> PanelEditResult:
+    """Run one edit turn and retain its validation feedback, including on failure."""
     prompt = _EDIT_INSTRUCTIONS.format(
         instruction=instruction.strip(),
         capabilities=json.dumps(capabilities, ensure_ascii=True),
         html=html,
+        data=json.dumps(data or {}, ensure_ascii=True),
     )
     thread_id = f"panel-edit-{uuid.uuid4().hex}"
     try:
         state = await graph.ainvoke(
             {"messages": [HumanMessage(content=prompt)]},
-            config={"configurable": {"thread_id": thread_id}},
+            config={"configurable": {"thread_id": thread_id, "panel_data": data or {}}},
         )
     finally:
         # Edit threads are throwaway; don't leave checkpoints lying around.
@@ -129,4 +150,4 @@ async def run_panel_edit(
                 await checkpointer.adelete_thread(thread_id)
 
     messages = state.get("messages", []) if isinstance(state, dict) else []
-    return _extract_updated_panel(messages)
+    return _extract_edit_result(messages)

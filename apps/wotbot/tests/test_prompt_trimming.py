@@ -20,10 +20,13 @@ def _tool_call(tool_id: str) -> dict:
 
 
 class PromptTrimmingTestCase(unittest.TestCase):
-    def test_file_download_locators_stay_in_state_but_out_of_model_context(self) -> None:
+    def test_artifact_ids_survive_trimming_but_download_uris_stay_out_of_model_context(
+        self,
+    ) -> None:
         file_summary = {
             "ref": "file_1",
             "kind": "file",
+            "id": "file-internal.csv",
             "filename": "forecast.csv",
             "mime_type": "text/csv",
             "size_bytes": 1267,
@@ -31,7 +34,6 @@ class PromptTrimmingTestCase(unittest.TestCase):
         }
         artifact = {
             **file_summary,
-            "id": "file-internal.csv",
             "uri": "wotbot://artifacts/file-internal.csv",
             "content_uri": "wotbot://artifacts/file-internal.csv/content",
         }

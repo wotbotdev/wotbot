@@ -93,6 +93,13 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       NEXT_POLL_INTERVAL_MS: "${NEXT_POLL_INTERVAL_MS:-1000}"
 
+  panel-validator:
+    build:
+      context: ../apps/wotbot
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8919:8919"
+
   code-executor:
     build:
       context: ../apps/code-executor

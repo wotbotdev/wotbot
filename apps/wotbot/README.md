@@ -69,6 +69,155 @@ in [`agent_api`](./src/wotbot/agent_api); [`a2a`](./src/wotbot/a2a) and
 the existing LangGraph assistant; raw MCP calls execute tools directly. Generated
 panels use the existing panel service and are returned as links to the UI.
 
+## Data attachments for generated panels
+
+`create_web_interface` accepts an optional `data` mapping from attachment names
+to artifact IDs returned by `run_code`. Export the computed result with
+`save_artifact(..., mime_type="application/json")` or
+`mime_type="application/geo+json"`. Panel JavaScript reads the decoded value
+synchronously with `window.panelData.read("areas")`; `panelData.names()` lists
+the available names. Each read returns a fresh copy.
+
+The backend verifies the export size/checksum and strict JSON, stores the
+original UTF-8 content, and delivers it separately from the agent-authored HTML.
+The model sees only references and metadata. There is no coordinate copying,
+extra browser network permission, or executor extension. A panel with attached
+data can omit Thing capabilities; live Thing calls still require their usual
+capability declarations. Limits are eight attachments and 8 MiB combined.
+
+The tool returns reusable `panel-data-...` references in its `data` field.
+The UI and API/MCP pin these resolved references, not the expiring source file
+IDs. Pinning retains snapshots for every saved panel version, including after
+source export expiry or chat deletion. Edits receive references and HTML, never
+the attached content. Version restoration restores the corresponding references.
+Omitting `data` during an AI edit preserves the current references automatically;
+an explicit mapping replaces them. Snapshots share the existing operator/panel
+access scopes. Temporary snapshots
+expire with their source export and are pruned on subsequent imports; deleting
+a panel removes snapshots no other panel or version uses. Existing panels and
+Thing bridges remain compatible. Startup applies migration `0009_panel_data`;
+downgrading refuses to discard data attached to saved panels.
+
+## Panel browser validation
+
+Generated panels, including live Thing and mixed live/attachment panels, must
+pass a Chromium initialization check before `create_web_interface` stores or
+returns their HTML artifact. The tool sends the
+exact wrapped document and attached snapshots to the separate `panel-validator`
+service. A failed check returns structured diagnostics to the agent. An unavailable
+validator, timeout or unavailable external dependency withholds the artifact and
+is reported separately from broken panel code.
+
+The default WoTBot image includes Playwright, headless Chromium and its system
+dependencies. The validator uses that same image with a separate command and
+non-root user; it has no separate Dockerfile or image publication.
+The image installs only Chromium's headless shell. A local Linux ARM64 build on
+2026-09-21 grew from 857 MB to 1.63 GB in unpacked layers: about 770 MB for
+Playwright, the browser and system dependencies. Services share these image layers.
+Start it with `docker compose up --build -d panel-validator`. Compose configures
+`PANEL_VALIDATOR_URL` for the backend and agent workers. For a backend running on
+the host, use `PANEL_VALIDATOR_URL=http://localhost:8919` with the development
+Compose override, or install `.[browser]`, run `playwright install chromium`, and
+start the service:
+
+```bash
+uvicorn wotbot.panels.browser_validator:app --host 127.0.0.1 --port 8919 \
+  --ws-max-size 134217728
+```
+
+The worker runs a new sandboxed Chromium process for each request, one request at
+a time, with a 25-second hard deadline. It checks runtime/console errors, resource
+failures, a completed nonempty `panelChecks` verdict, and a uniform blank screenshot
+at 1000×650. After one second of observation it captures that viewport, resizes
+the same panel to 390×650, observes another second and captures it again. This
+does not reload the panel or repeat initial property reads. Each attempt saves its
+diagnostics, self-checks, document hash and captured PNGs in Postgres. The chat's
+**View validation** control shows the attempt history, saved reports and screenshots;
+it also appears on the delivered panel. Screenshot bytes stay out of the generating
+conversation and tool results. No user interaction testing is performed.
+The readiness result is read-only from the moment the wrapper loads. A browser
+pass requires individual passing assertions and both screenshots; a status label
+without that evidence is rejected.
+Direct manual panel API edits do not go through this creation-time gate.
+Saved-panel AI edits return validation evidence on both success and failure.
+The drawer shows the latest edit's warnings, diagnostics, attempt history and
+screenshots. Failed edits preserve the saved panel; applying a manual edit or
+restoring a version clears the previous AI edit's feedback from the drawer.
+
+An independent model call reviews both viewport screenshots for empty content,
+missing map tiles, rendered errors, clipped labels and overlap. Its findings are
+**advisory**: definite and uncertain findings appear as warnings; they never
+change the browser verdict or trigger automatic repair. Reviewer outages and
+incomplete responses appear as unavailable, never as a clean review. This does
+not verify facts, geography, underlying data, content below the viewport or controls.
+
+`PANEL_VISUAL_REVIEW_ENABLED=true` enables this review by default when
+`OPENAI_MODEL_SUPPORTS_VISION=true`. It reuses the configured model endpoint/key;
+`PANEL_VISUAL_REVIEW_MODEL` optionally selects a different image-capable model on
+that endpoint. An explicit override declares image support for that model.
+The call gets only the two screenshots and a fixed rubric, with no generating
+conversation, HTML or raw attachments. Visible device values can appear in those
+images. Credentials remain in the backend/worker, never the validator. There is
+one request, no provider retries, a 30-second deadline and a 2500-token output
+limit. Each report records model, rubric version, latency, token usage and cost
+when the provider reports it. Token counts are not billed cost.
+
+Each panel has one initial attempt and at most two repairs in a user turn.
+Accounting uses checkpointed tool history, so changing a title or attachment does
+not reset a failed attempt. Static and attachment failures count too. Inconclusive
+or unavailable checks stop retries immediately, and simultaneous panel calls are
+rejected so they cannot race the limit. After success, a separate panel can start
+its own budget; a new user message also starts a fresh budget. Direct programmatic
+calls without conversation history return no automatic retry permission.
+Missing or expired export IDs are repairable attachment failures; executor
+connection failures and server outages stop retries as unavailable.
+
+Migration `0010_panel_validation_reports` adds evidence storage;
+`0011_panel_narrow_screenshot` adds the second PNG. Reports expire
+after 30 days, become inaccessible on expiry and are pruned on subsequent saves.
+Deleting their source chat also deletes them. A report is limited to 128 KiB and
+each PNG to 4 MiB. Saving evidence must succeed before delivery. Read endpoints
+`/api/panel-validation/{id}` and `/api/panel-validation/{id}/screenshot` use the
+existing panel read scope and private, uncached responses. The screenshot endpoint
+accepts `?viewport=normal` (default) or `?viewport=narrow`. External A2A/MCP
+conversation evidence is excluded from these UI routes. Temporary panel-edit
+reports without a saved chat use the same expiry. Reports are collected for new
+attempts only; screenshots from earlier chats cannot be recovered retroactively.
+
+Live panels read real property values through a restricted bridge. A private
+WebSocket connects the validator to the calling backend/agent process, which
+keeps the runtime credentials and invokes only `read_property`. Both ends enforce
+the panel's declared Thing IDs, property names and `readProperty` capability;
+URI variables and decoded JSON/binary values follow the UI bridge's contract.
+The check allows at most 20 reads, with a five-second timeout per read within the
+overall deadline. Runtime failures make validation inconclusive even if the
+panel catches the error. Raw property responses are not copied into the tool
+result; visual findings may quote text visible in the screenshots.
+
+Writes, actions, property observations and event subscriptions are blocked during
+validation and listed as untested in the result. Attempting them during loading
+makes the verdict inconclusive and withholds the artifact. Controls are never
+clicked: a panel can pass initialization with an action button whose interaction
+remains untested. The agent is instructed to use reads for initial state and
+wait until rendering finishes before calling `panelChecks`.
+
+Chromium retains its sandbox. The container runs without backend credentials
+or persistent storage. Its read relay cannot invoke runtime mutations. Its CSP
+matches the UI's policy, and network interception permits only the approved HTTPS dependencies,
+checking redirect targets before fetching them. The worker's two synthetic origins
+match the production iframe's cross-origin relationship and sandbox flags; they
+do not reproduce deployment-specific permissions or authentication. The
+[Playwright seccomp profile](https://github.com/microsoft/playwright/blob/v1.63.0/utils/docker/seccomp_profile.json)
+is vendored in `deploy/panel-validator-seccomp.json` (license in the sibling
+`panel-validator-seccomp.LICENSE`), with `chroot` additionally
+allowed so Chromium can enter its own sandbox while container capabilities are
+dropped. Hosts must support unprivileged user namespaces; browser launch failures
+fail validation instead of disabling the sandbox.
+Use the root Compose entrypoint, or set `PANEL_VALIDATOR_SECCOMP_PROFILE` to the
+profile's absolute path when using a different Compose project directory.
+
+See [browser tests](tests/browser/README.md) for regression commands.
+
 ## Persistence And Migrations
 
 The application schema is owned by Alembic migrations in [`src/wotbot/migrations`](./src/wotbot/migrations). They ship inside the `wotbot` package so `alembic upgrade head` resolves them in every install mode. App startup calls `alembic upgrade head`, so API, worker, LiveKit, and indexer processes share the same schema path.

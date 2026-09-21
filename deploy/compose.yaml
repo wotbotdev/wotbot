@@ -7,6 +7,7 @@ services:
       - wotbot-data:/data
     environment:
       CODE_EXECUTOR_URL: "http://code-executor:8888"
+      PANEL_VALIDATOR_URL: "http://panel-validator:8919"
       JOB_RUNNER_URL: "http://wotbot:8123"
       REDIS_URL: "redis://valkey:6379"
       WOT_RUNTIME_URL: "http://wot-runtime:3003"
@@ -18,6 +19,8 @@ services:
       LIVEKIT_AGENT_NAME: "${LIVEKIT_AGENT_NAME:-wotbot}"
       LIVEKIT_ROOM_PREFIX: "${LIVEKIT_ROOM_PREFIX:-wotbot}"
     depends_on:
+      panel-validator:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       valkey:
@@ -42,10 +45,13 @@ services:
     command: ["wotbot", "job-worker"]
     environment:
       CODE_EXECUTOR_URL: "http://code-executor:8888"
+      PANEL_VALIDATOR_URL: "http://panel-validator:8919"
       REDIS_URL: "redis://valkey:6379"
       WOT_RUNTIME_URL: "http://wot-runtime:3003"
       REGISTRY_PUBLIC_URL: "${REGISTRY_PUBLIC_URL:-http://wotbot:8123}"
     depends_on:
+      panel-validator:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       valkey:
@@ -65,6 +71,7 @@ services:
     command: ["wotbot", "livekit-agent", "start"]
     environment:
       CODE_EXECUTOR_URL: "http://code-executor:8888"
+      PANEL_VALIDATOR_URL: "http://panel-validator:8919"
       REDIS_URL: "redis://valkey:6379"
       WOT_RUNTIME_URL: "http://wot-runtime:3003"
       REGISTRY_PUBLIC_URL: "${REGISTRY_PUBLIC_URL:-http://wotbot:8123}"
@@ -75,6 +82,8 @@ services:
       LIVEKIT_AGENT_NAME: "${LIVEKIT_AGENT_NAME:-wotbot}"
       LIVEKIT_ROOM_PREFIX: "${LIVEKIT_ROOM_PREFIX:-wotbot}"
     depends_on:
+      panel-validator:
+        condition: service_healthy
       livekit:
         condition: service_started
       postgres:
@@ -176,6 +185,39 @@ services:
     networks:
       - frontend-internal
       - backend-isolated
+    restart: unless-stopped
+
+  panel-validator:
+    image: ghcr.io/wotbotdev/wotbot:latest
+    command: ["uvicorn", "wotbot.panels.browser_validator:app", "--host", "0.0.0.0", "--port", "8919", "--ws-max-size", "134217728"]
+    user: validator
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8919/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+    # No .env, runtime credentials, or artifact volume in this container.
+    read_only: true
+    tmpfs:
+      - /tmp:size=256M
+    shm_size: 256mb
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      # Relative to Compose's project directory (the root Compose entrypoint).
+      - seccomp=${PANEL_VALIDATOR_SECCOMP_PROFILE:-./deploy/panel-validator-seccomp.json}
+    deploy:
+      resources:
+        limits:
+          cpus: '1.00'
+          memory: 1024M
+          pids: 128
+    networks:
+      - backend-isolated
+      - egress-api
     restart: unless-stopped
 
   code-executor:

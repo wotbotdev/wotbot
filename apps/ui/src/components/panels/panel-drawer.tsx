@@ -21,6 +21,12 @@ import { toast } from 'sonner';
 
 import { CodeEditor } from '@/components/code-editor';
 import { PanelFrame } from '@/components/wotbot/chat-tool-calls/panel-frame';
+import { PanelValidationDetails } from '@/components/wotbot/chat-tool-calls/panel-validation-details';
+import {
+  parsePanelValidation,
+  type PanelValidation,
+} from '@/components/wotbot/chat-tool-calls/panel-validation-model';
+import { HttpError } from '@/lib/http-client';
 import {
   type PanelRecord,
   type PanelVersion,
@@ -103,6 +109,10 @@ export function PanelDrawer({
   // AI edit state
   const [instruction, setInstruction] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [editFeedback, setEditFeedback] = useState<{
+    validation?: PanelValidation;
+    error?: string;
+  } | null>(null);
 
   // Raw source state
   const [html, setHtml] = useState('');
@@ -142,6 +152,7 @@ export function PanelDrawer({
       options: { reloadFrame?: boolean; resetSource?: boolean } = {},
     ) => {
       onChanged(updated);
+      setEditFeedback(null);
       if (options.reloadFrame ?? true) {
         setVersion((v) => v + 1);
       }
@@ -258,8 +269,13 @@ export function PanelDrawer({
   const handleAiEdit = async () => {
     if (!instruction.trim()) return;
     setIsEditing(true);
+    setEditFeedback(null);
     try {
-      applied(await editPanel(panel.id, instruction.trim()));
+      const updated = await editPanel(panel.id, instruction.trim());
+      applied(updated);
+      setEditFeedback({
+        validation: parsePanelValidation(updated.browser_validation),
+      });
       setInstruction('');
       setAiOpen(false);
       setSourceOpen(false);
@@ -268,7 +284,17 @@ export function PanelDrawer({
       }
       toast.success('Panel updated');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Edit failed');
+      const message = error instanceof Error ? error.message : 'Edit failed';
+      const detail = error instanceof HttpError ? error.detail : undefined;
+      setEditFeedback({
+        error: message,
+        validation:
+          detail && typeof detail === 'object' && 'browser_validation' in detail
+            ? parsePanelValidation(detail.browser_validation)
+            : undefined,
+      });
+      setAiOpen(false);
+      toast.error(message);
     } finally {
       setIsEditing(false);
     }
@@ -558,6 +584,23 @@ export function PanelDrawer({
             </DrawerClose>
           </div>
         </DrawerHeader>
+
+        {editFeedback ? (
+          <div className="max-h-[45%] shrink-0 space-y-1 overflow-y-auto border-b border-border/55 bg-background px-4 py-3">
+            <p
+              className="text-sm"
+              role={editFeedback.error ? 'alert' : 'status'}
+            >
+              {editFeedback.error ?? 'Panel updated by AI.'}
+            </p>
+            {editFeedback.validation ? (
+              <PanelValidationDetails
+                key={editFeedback.validation.reportId}
+                validation={editFeedback.validation}
+              />
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="min-h-0 flex-1 bg-muted/25">
           {sourceOpen ? (

@@ -311,6 +311,58 @@ class DynamicToolBindingTestCase(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(signature.parameters["config"].annotation, "Optional[RunnableConfig]")
 
+    async def test_llm_receives_export_ids_for_panel_attachments(self) -> None:
+        import json
+
+        artifact_id = "file-0123456789abcdef0123456789abcdef.json"
+        original = json.dumps(
+            {
+                "ok": True,
+                "stdout": "Saved comparison data",
+                "artifacts": [
+                    {
+                        "kind": "file",
+                        "id": artifact_id,
+                        "ref": "file_1",
+                        "filename": "comparison.json",
+                        "mime_type": "application/json",
+                        "uri": f"wotbot://artifacts/{artifact_id}",
+                        "content_uri": f"wotbot://artifacts/{artifact_id}/content",
+                    }
+                ],
+                "wot_calls": [{"value": {"large_dataset": [1, 2, 3]}}],
+            }
+        )
+        result = ToolMessage(content=original, name="run_code", tool_call_id="call_1")
+        llm = _FakeLLM()
+        node = _make_llm_node(
+            llm,
+            tools=[_tool("create_web_interface")],
+            system_text="system",
+            max_tokens=4000,
+            camera_frames_enabled=False,
+        )
+        await node(
+            {
+                "messages": [
+                    HumanMessage(content="Show the computed comparison in a panel"),
+                    AIMessage(
+                        content="",
+                        tool_calls=[{"name": "run_code", "args": {}, "id": "call_1"}],
+                    ),
+                    result,
+                ]
+            }
+        )
+        sent = next(m for m in llm.invocations[0][1] if isinstance(m, ToolMessage))
+        payload = json.loads(sent.content)
+        self.assertEqual(payload["artifacts"][0]["id"], artifact_id)
+        self.assertEqual(payload["artifacts"][0]["ref"], "file_1")
+        self.assertNotIn("uri", payload["artifacts"][0])
+        self.assertNotIn("content_uri", payload["artifacts"][0])
+        self.assertNotIn("wot_calls", payload)
+        self.assertEqual(result.content, original)
+
     async def test_llm_node_attaches_camera_frame_when_main_model_supports_it(self) -> None:
         llm = _FakeLLM()
         prepared = [HumanMessage(content=[{"type": "image_url", "image_url": {"url": "frame"}}])]

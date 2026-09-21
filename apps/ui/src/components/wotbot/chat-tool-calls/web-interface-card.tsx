@@ -6,6 +6,7 @@ import { CircleAlert, Expand, Pin, PinOff, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { PanelFrame } from '@/components/wotbot/chat-tool-calls/panel-frame';
+import { PanelValidationDetails } from './panel-validation-details';
 import {
   DetailsToggle,
   ToolCardHeader,
@@ -74,6 +75,7 @@ export const WebInterfaceArtifactView = memo(function WebInterfaceArtifactView({
         title: artifact.title || 'Untitled panel',
         html: artifact.html,
         capabilities: artifact.capabilities,
+        data: artifact.data,
         sourceThreadId: chatMatch ? chatMatch[1] : null,
       });
       setPinned(true);
@@ -166,6 +168,12 @@ export const WebInterfaceArtifactView = memo(function WebInterfaceArtifactView({
                 </Tooltip>
               </div>
             </div>
+            {artifact.validation ? (
+              <PanelValidationDetails
+                key={artifact.validation.reportId}
+                validation={artifact.validation}
+              />
+            ) : null}
             {fill ? (
               <PanelFrame
                 capabilities={artifact.capabilities}
@@ -303,6 +311,13 @@ export const WebInterfaceCard = memo(function WebInterfaceCard({
             </pre>
           </AlertDescription>
         </Alert>
+      ) : null}
+
+      {parsed.validation && (!showInterface || !artifact) ? (
+        <PanelValidationDetails
+          key={parsed.validation.reportId}
+          validation={parsed.validation}
+        />
       ) : null}
 
       {showInterface && isCompleted && artifact ? (

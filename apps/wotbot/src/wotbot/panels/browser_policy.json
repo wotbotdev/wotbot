@@ -1,0 +1,13 @@
+{
+  "default-src": ["'none'"],
+  "script-src": ["'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://cdn.plot.ly"],
+  "style-src": ["'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://cdn.plot.ly"],
+  "font-src": ["https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://cdn.plot.ly"],
+  "img-src": ["'self'", "data:", "blob:", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://cdn.plot.ly", "https://tile.openstreetmap.org", "https://*.tile.openstreetmap.org", "https://server.arcgisonline.com"],
+  "media-src": ["'self'", "blob:", "data:"],
+  "worker-src": ["'self'", "blob:"],
+  "connect-src": ["blob:", "data:", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://cdnjs.cloudflare.com", "https://cdn.plot.ly", "https://fonts.googleapis.com", "https://fonts.gstatic.com", "https://tile.openstreetmap.org", "https://*.tile.openstreetmap.org", "https://server.arcgisonline.com"],
+  "form-action": ["'none'"],
+  "base-uri": ["'none'"],
+  "frame-src": ["'none'"]
+}

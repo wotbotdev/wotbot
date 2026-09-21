@@ -586,3 +586,119 @@ test('cached conversion matches fresh conversion through streaming, edits, recov
     );
   }
 });
+
+test('reused provider IDs keep separate executions, results and artifact keys', () => {
+  const history: LangChainMessage[] = [
+    { type: 'human', id: 'h1', content: 'compare' },
+    {
+      type: 'ai',
+      id: 'step-1',
+      tool_calls: [
+        { id: 'replayed', name: 'run_code', args: { code: 'first()' } },
+      ],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'replayed',
+      status: 'error',
+      content: '{"stdout":"failed"}',
+    },
+    {
+      type: 'ai',
+      id: 'step-2',
+      tool_calls: [
+        { id: 'replayed', name: 'run_code', args: { code: 'retry()' } },
+      ],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'replayed',
+      content: '{"stdout":"recovered"}',
+    },
+    { type: 'ai', id: 'answer', content: 'Done.' },
+  ];
+  const before = JSON.stringify(history);
+  const out = toThreadMessages(history);
+  const calls = groupCalls(out[1]);
+  assert.equal(new Set(calls.map((call) => call.id)).size, calls.length);
+  const executions = calls.filter((call) => call.name === 'run_code');
+  assert.equal(executions.length, 2);
+  assert.deepEqual(
+    executions.map((call) => call.args),
+    [{ code: 'first()' }, { code: 'retry()' }],
+  );
+  assert.deepEqual(
+    executions.map((call) => call.result),
+    [{ stdout: 'failed' }, { stdout: 'recovered' }],
+  );
+  assert.equal(executions[0].isError, true);
+  assert.equal(executions[1].isError, undefined);
+  assert.deepEqual(
+    calls
+      .filter((call) => call.name === ARTIFACT_VIEW_NAME)
+      .map((call) => call.result),
+    executions.map((call) => call.result),
+  );
+  assert.equal(JSON.stringify(history), before);
+});
+
+test('duplicate keys remain stable as the repeated call streams its result', () => {
+  const convert = createThreadMessageConverter();
+  const first: LangChainMessage[] = [
+    {
+      type: 'ai',
+      id: 'a1',
+      tool_calls: [{ id: 'c', name: 'run_code', args: {} }],
+    },
+    { type: 'tool', tool_call_id: 'c', content: '{"stdout":"first"}' },
+  ];
+  const initial = convert(first);
+  const pending: LangChainMessage[] = [
+    ...first,
+    {
+      type: 'ai',
+      id: 'a2',
+      tool_calls: [{ id: 'c', name: 'run_code', args: {} }],
+    },
+  ];
+  const streamed = convert(pending);
+  const completed = convert([
+    ...pending,
+    { type: 'tool', tool_call_id: 'c', content: '{"stdout":"second"}' },
+    { type: 'ai', id: 'a3', content: 'Done.' },
+  ]);
+  const ids = (messages: unknown[]) =>
+    groupCalls(messages[0]).map((call) => call.id);
+  assert.ok(ids(initial).every((id) => ids(streamed).includes(id)));
+  assert.ok(ids(streamed).every((id) => ids(completed).includes(id)));
+  assert.equal(parts(initial[0])[0], parts(completed[0])[0]);
+  assert.equal(new Set(ids(completed)).size, ids(completed).length);
+});
+
+test('generated part keys cannot collide with provider IDs', () => {
+  const out = toThreadMessages([
+    {
+      type: 'ai',
+      id: 'a1',
+      tool_calls: [
+        { id: 'c', name: 'run_code', args: {} },
+        { id: 'c:2', name: 'other', args: {} },
+        { id: 'artifact:c', name: 'other', args: {} },
+      ],
+    },
+    { type: 'tool', tool_call_id: 'c', content: 'first' },
+    {
+      type: 'ai',
+      id: 'a2',
+      tool_calls: [{ id: 'c', name: 'run_code', args: {} }],
+    },
+    { type: 'tool', tool_call_id: 'c', content: 'second' },
+  ]);
+  const calls = groupCalls(out[0]);
+  assert.equal(calls.length, 6);
+  assert.equal(new Set(calls.map((call) => call.id)).size, calls.length);
+  assert.deepEqual(
+    calls.filter((call) => call.name === 'run_code').map((call) => call.result),
+    ['first', 'second'],
+  );
+});

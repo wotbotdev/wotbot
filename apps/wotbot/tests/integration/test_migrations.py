@@ -35,7 +35,7 @@ def clear_agent_artifacts(jobs_integration_environment):
     # Task provenance is a soft reference, so the shared fixture's thread
     # truncation does not remove artifacts left by other integration modules.
     with get_session_factory()() as session:
-        session.execute(text("TRUNCATE a2a_artifacts"))
+        session.execute(text("TRUNCATE a2a_artifacts, panels, panel_data CASCADE"))
         session.commit()
 
 
@@ -72,10 +72,10 @@ def test_alembic_metadata_has_no_pending_schema_drift(jobs_integration_environme
     command.check(_alembic_config())
 
 
-def test_agent_execution_is_one_revision_after_discovery() -> None:
+def test_panel_migrations_extend_the_agent_execution_schema() -> None:
     script = ScriptDirectory.from_config(_alembic_config())
-    assert script.get_heads() == ["0008_agent_execution"]
-    revisions = list(script.iterate_revisions("head", "0007_add_thing_origin"))
+    assert script.get_heads() == ["0011_panel_narrow_screenshot"]
+    revisions = list(script.iterate_revisions("0008_agent_execution", "0007_add_thing_origin"))
     assert [revision.revision for revision in revisions] == ["0008_agent_execution"]
 
 
@@ -88,6 +88,9 @@ def _agent_request(family):
 
 def test_branch_head_can_be_restamped_without_changing_retained_agent_data() -> None:
     config = _alembic_config()
+    # Reproduce the old agent branch's schema before adopting its squashed head.
+    # Later panel migrations must run once, as on a retained development database.
+    command.downgrade(config, "0008_agent_execution")
     store = TaskStore()
     owner = str(uuid4())
     tasks = {
@@ -287,11 +290,29 @@ def test_a2a_migration_preserves_existing_chat_panels_jobs_and_virtual_ownership
         session.commit()
     chat_id = "preserved-chat"
     with get_session_factory()() as session:
-        panel = PanelService(session).create_panel(
-            title="Preserved", html="<p>Original</p>", capabilities=[], source_thread_id=chat_id
+        # Use the pre-migration shape: the current ORM also has attachment columns.
+        panel = {"id": str(uuid4())}
+        session.execute(
+            text(
+                "INSERT INTO panels (id,title,html,capabilities,source_thread_id) "
+                "VALUES (:id,'Preserved','<p>Edited</p>','[]',:thread)"
+            ),
+            {"id": panel["id"], "thread": chat_id},
         )
-        PanelService(session).update_panel(panel["id"], html="<p>Edited</p>")
-        versions = PanelService(session).list_versions(panel["id"])
+        for number, markup in ((1, "<p>Original</p>"), (2, "<p>Edited</p>")):
+            session.execute(
+                text(
+                    "INSERT INTO panel_versions (id,panel_id,version,source,title,html,capabilities) "
+                    "VALUES (:id,:panel_id,:version,:source,'Preserved',:html,'[]')"
+                ),
+                {
+                    "id": str(uuid4()),
+                    "panel_id": panel["id"],
+                    "version": number,
+                    "source": "initial" if number == 1 else "manual",
+                    "html": markup,
+                },
+            )
         session.add(
             JobRecord(
                 id="preserved-job",
@@ -344,7 +365,9 @@ def test_a2a_migration_preserves_existing_chat_panels_jobs_and_virtual_ownership
         assert preserved["title"] == "My conversation" and preserved["kind"] == "chat"
         with get_session_factory()() as session:
             service = PanelService(session)
-            assert service.list_versions(panel["id"]) == versions
+            versions = service.list_versions(panel["id"])["items"]
+            assert [version["version"] for version in versions] == [2, 1]
+            assert all(version["data"] == {} for version in versions)
             assert service.get_panel(panel["id"], include_html=True)["html"] == "<p>Edited</p>"
             assert session.get(JobRecord, "preserved-job").waiting_question == "Proceed?"
             assert session.get(JobRecord, "preserved-job").interaction_mode == "required_checkin"

@@ -37,6 +37,12 @@ async def run_code(code: str, config: RunnableConfig) -> dict:
     URLs, expose internal artifact URIs, or reconstruct file contents in the
     conversation.
 
+    For interactive maps/dashboards, save JSON or GeoJSON with MIME type
+    application/json or application/geo+json, then pass its returned artifact ID
+    (`id`, not `ref` or `filename`) to create_web_interface's named `data`
+    attachments. The interface reads it
+    with window.panelData.read(name). Do not print datasets for copying into HTML.
+
     Failed code may have performed earlier device actions. Inspect the returned
     interactions and current device state before retrying any actions.
     """

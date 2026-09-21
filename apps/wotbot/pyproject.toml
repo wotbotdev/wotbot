@@ -49,6 +49,10 @@ test = [
     "anyio>=4,<5",
     "pytest-docker>=3.2,<4",
 ]
+# Chromium is far larger than the rest of the test dependencies combined, so the
+# browser acceptance run installs separately: `pip install -e .[browser]` followed
+# by `playwright install chromium`.
+browser = ["playwright==1.63.0", "psutil>=7,<8"]
 
 [project.scripts]
 wotbot = "wotbot.cli:main"
@@ -68,6 +72,8 @@ packages = ["src/wotbot"]
 "src/wotbot/catalog/enrichment/data/vocab/qudt-units.json" = "wotbot/catalog/enrichment/data/vocab/qudt-units.json"
 "src/wotbot/catalog/enrichment/data/shapes/td-enrichment.ttl" = "wotbot/catalog/enrichment/data/shapes/td-enrichment.ttl"
 "src/wotbot/panels/wot_bridge.js" = "wotbot/panels/wot_bridge.js"
+"src/wotbot/panels/panel_checks.js" = "wotbot/panels/panel_checks.js"
+"src/wotbot/panels/browser_policy.json" = "wotbot/panels/browser_policy.json"
 # Alembic config + the revision template are non-Python assets, so they must be
 # force-included for the runtime ``alembic upgrade head`` to find them in the
 # installed wheel. The ``env.py`` and ``versions/*.py`` ship as package code.
@@ -116,4 +122,5 @@ pythonpath = ["src"]
 markers = [
     "integration: tests that start containerized service dependencies",
     "external: opt-in tests that contact public internet services",
+    "browser: tests that drive a real headless browser",
 ]

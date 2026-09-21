@@ -7,6 +7,11 @@
  * sandboxed interface.
  */
 
+import {
+  parsePanelValidation,
+  type PanelValidation,
+} from './panel-validation-model';
+
 export const WOT_BRIDGE_OPS = [
   'readProperty',
   'writeProperty',
@@ -27,16 +32,19 @@ export type WebInterfaceArtifact = {
   ref: string;
   filename: string;
   capabilities: WotCapability[];
+  data?: Record<string, string>;
   // Populated from the tool call args (not the result) for pinning; the raw
   // agent body markup and its title. Absent when only the result is available.
   html?: string;
   title?: string;
   sourceThreadId?: string | null;
+  validation?: PanelValidation;
 };
 
 export type WebInterfaceResult = {
   artifact?: WebInterfaceArtifact;
   error?: string;
+  validation?: PanelValidation;
 };
 
 function parseCapabilities(value: unknown): WotCapability[] {
@@ -93,6 +101,7 @@ export function normalizeWebInterfaceResult(
 
   const raw = rawResult as Record<string, unknown>;
   const error = typeof raw.error === 'string' ? raw.error : undefined;
+  const validation = parsePanelValidation(raw.browser_validation);
 
   let artifact: WebInterfaceArtifact | undefined;
   if (Array.isArray(raw.artifacts)) {
@@ -115,11 +124,22 @@ export function normalizeWebInterfaceResult(
         filename,
         capabilities: parseCapabilities(candidate.capabilities),
       };
+      if (validation) artifact.validation = validation;
+      if (
+        candidate.data &&
+        typeof candidate.data === 'object' &&
+        !Array.isArray(candidate.data)
+      ) {
+        const entries = Object.entries(candidate.data).filter(
+          (entry): entry is [string, string] => typeof entry[1] === 'string',
+        );
+        if (entries.length) artifact.data = Object.fromEntries(entries);
+      }
       break;
     }
   }
 
-  return { artifact, error };
+  return { artifact, error, validation };
 }
 
 /**

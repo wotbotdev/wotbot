@@ -1,5 +1,7 @@
 """Local acceptance fixtures only; no real credentials or device connections."""
 
+import json
+import math
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -20,6 +22,46 @@ def normal_host():
 def normal_panel():
     return HTMLResponse(
         wrap_panel_document((ROOT / "panel-fixture.html").read_text(), "Test panel")
+    )
+
+
+@app.get("/blank-panel")
+def blank_panel():
+    # An empty wrapped document: somewhere to exercise the injected helpers
+    # directly, without a fixture panel's own markup also running.
+    return HTMLResponse(wrap_panel_document("", "Blank panel"))
+
+
+@app.get("/data-panel")
+def data_panel():
+    # Larger than executor stdout, with a hole and full precision coordinates.
+    ring = [
+        [
+            7.12345678912345 + 0.01 * math.cos(i * math.tau / 600),
+            49.56789123456789 + 0.006 * math.sin(i * math.tau / 600),
+        ]
+        for i in range(600)
+    ]
+    ring.append(ring[0])
+    hole = [[7.122, 49.567], [7.124, 49.567], [7.124, 49.568], [7.122, 49.568], [7.122, 49.567]]
+    areas = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "id": "area-A",
+                "properties": {"name": "Area A", "color": "#276749"},
+                "geometry": {"type": "Polygon", "coordinates": [ring, hole]},
+            }
+        ],
+        "label": "</script><script>window.injected=true</script>",
+    }
+    return HTMLResponse(
+        wrap_panel_document(
+            (ROOT / "data-panel.html").read_text(),
+            "Attached data acceptance",
+            data={"areas": json.dumps(areas, allow_nan=False)},
+        )
     )
 
 

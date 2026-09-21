@@ -5,6 +5,7 @@ export interface PanelRecord {
   id: string;
   title: string;
   capabilities: WotCapability[];
+  data?: Record<string, string>;
   source_thread_id: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -14,6 +15,10 @@ export interface PanelDetail extends PanelRecord {
   html?: string;
 }
 
+export interface PanelEditResponse extends PanelRecord {
+  browser_validation?: unknown;
+}
+
 export interface PanelVersion {
   id: string;
   panel_id: string;
@@ -21,6 +26,7 @@ export interface PanelVersion {
   source: 'initial' | 'manual' | 'ai' | 'restore' | string;
   title: string;
   capabilities: WotCapability[];
+  data?: Record<string, string>;
   created_at: string | null;
 }
 
@@ -41,6 +47,7 @@ export async function pinPanel(input: {
   title: string;
   html: string;
   capabilities: WotCapability[];
+  data?: Record<string, string>;
   sourceThreadId?: string | null;
 }): Promise<PanelRecord> {
   return httpJson<PanelRecord>('/panels', {
@@ -50,6 +57,7 @@ export async function pinPanel(input: {
       title: input.title,
       html: input.html,
       capabilities: input.capabilities,
+      data: input.data ?? {},
       source_thread_id: input.sourceThreadId ?? null,
     }),
   });
@@ -67,6 +75,7 @@ export async function updatePanel(
     title?: string;
     html?: string;
     capabilities?: WotCapability[];
+    data?: Record<string, string>;
   },
 ): Promise<PanelRecord> {
   return httpJson<PanelRecord>(`/panels/${encodeURIComponent(id)}`, {
@@ -96,8 +105,8 @@ export async function restorePanelVersion(
 export async function editPanel(
   id: string,
   instruction: string,
-): Promise<PanelRecord> {
-  return httpJson<PanelRecord>(`/panels/${encodeURIComponent(id)}/edit`, {
+): Promise<PanelEditResponse> {
+  return httpJson<PanelEditResponse>(`/panels/${encodeURIComponent(id)}/edit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ instruction }),

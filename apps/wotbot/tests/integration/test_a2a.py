@@ -703,12 +703,28 @@ async def test_generated_panel_is_saved_and_exported_as_a_panel_pointer(environm
     from wotbot.agent_api.artifacts import ArtifactStore
     from wotbot.agent_api.outputs import PANEL_MEDIA_TYPE, ArtifactCollector
     from wotbot.core.agent_runs import RunEvent
-    from wotbot.panels.models import Panel, PanelVersion
+    from wotbot.panels.models import Panel, PanelData, PanelVersion
     from wotbot.panels.render import wrap_panel_document
 
     owner, _token, _other, _token2, _limited = environment
     markup = "<button onclick=\"wot.writeProperty('lamp','power',true)\">On</button>"
     caps = [{"thingId": "lamp", "affordances": ["power"], "ops": ["writeProperty"]}]
+    snapshot_id = "panel-data-" + uuid4().hex
+    with get_session_factory()() as session:
+        session.add(
+            PanelData(
+                id=snapshot_id,
+                artifact_id="file-values.json",
+                filename="values.json",
+                mime_type="application/json",
+                sha256="test",
+                size_bytes=2,
+                content="{}",
+                expires_at=utc_now() + timedelta(hours=1),
+            )
+        )
+        session.commit()
+    data = {"values": snapshot_id}
     collector = ArtifactCollector(
         settings=Settings(), owner=owner, task_id="panel-task", thread_id="hidden"
     )
@@ -732,7 +748,12 @@ async def test_generated_panel_is_saved_and_exported_as_a_panel_pointer(environm
                     content=json.dumps(
                         {
                             "artifacts": [
-                                {"kind": "web", "filename": "preview.html", "capabilities": caps}
+                                {
+                                    "kind": "web",
+                                    "filename": "preview.html",
+                                    "capabilities": caps,
+                                    "data": data,
+                                }
                             ]
                         }
                     ),
@@ -750,6 +771,8 @@ async def test_generated_panel_is_saved_and_exported_as_a_panel_pointer(environm
         version = session.get(PanelVersion, descriptor["panelVersionId"])
         assert panel.html == version.html == markup
         assert panel.capabilities == version.capabilities == caps
+        assert panel.data == version.data == data
+        assert session.get(PanelData, snapshot_id).expires_at is None
         assert version.source == "initial"
         assert markup in wrap_panel_document(panel.html, panel.title)
 

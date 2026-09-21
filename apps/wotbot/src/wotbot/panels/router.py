@@ -1,13 +1,14 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from wotbot.auth import User, require_scopes
 from wotbot.core.api_dependencies import SessionDep
 from wotbot.panels.edit import run_panel_edit
 from wotbot.panels.render import wrap_panel_document
+from wotbot.panels.reports import get_report
 from wotbot.panels.service import PanelService
 
 router = APIRouter(prefix="/api", tags=["panels"])
@@ -18,16 +19,56 @@ class CreatePanelBody(BaseModel):
     html: str
     capabilities: list[dict[str, Any]] = Field(default_factory=list)
     source_thread_id: str | None = None
+    data: dict[str, str] = Field(default_factory=dict)
 
 
 class UpdatePanelBody(BaseModel):
     title: str | None = None
     html: str | None = None
     capabilities: list[dict[str, Any]] | None = None
+    data: dict[str, str] | None = None
 
 
 class EditPanelBody(BaseModel):
     instruction: str
+
+
+@router.get("/panel-validation/{report_id}")
+def validation_report(
+    report_id: str,
+    session: SessionDep,
+    response: Response,
+    _user: User = Depends(require_scopes(["things:read"])),
+):
+    row = get_report(session, report_id)
+    response.headers["Cache-Control"] = "private, no-store"
+    return {
+        **row.report,
+        "title": row.title,
+        "document_sha256": row.document_sha256,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+@router.get("/panel-validation/{report_id}/screenshot")
+def validation_screenshot(
+    report_id: str,
+    session: SessionDep,
+    viewport: Literal["normal", "narrow"] = "normal",
+    _user: User = Depends(require_scopes(["things:read"])),
+):
+    row = get_report(session, report_id)
+    screenshot = row.narrow_screenshot if viewport == "narrow" else row.screenshot
+    if screenshot is None:
+        raise HTTPException(status_code=404, detail="No screenshot captured for this attempt")
+    return Response(
+        screenshot,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/panels")
@@ -49,6 +90,7 @@ def create_panel(
         html=body.html,
         capabilities=body.capabilities,
         source_thread_id=body.source_thread_id,
+        data=body.data,
     )
 
 
@@ -87,8 +129,8 @@ def render_panel(
     session: SessionDep,
     _user: User = Depends(require_scopes(["things:read"])),
 ) -> HTMLResponse:
-    html, title = PanelService(session).get_render_payload(panel_id)
-    return HTMLResponse(content=wrap_panel_document(html, title))
+    html, title, contents = PanelService(session).get_render_payload(panel_id)
+    return HTMLResponse(content=wrap_panel_document(html, title, data=contents))
 
 
 @router.patch("/panels/{panel_id}")
@@ -103,6 +145,7 @@ def update_panel(
         title=body.title,
         html=body.html,
         capabilities=body.capabilities,
+        data=body.data,
     )
 
 
@@ -118,7 +161,7 @@ async def edit_panel(
         raise HTTPException(status_code=422, detail="instruction must not be empty")
 
     service = PanelService(session)
-    panel = service.get_render_payload_with_capabilities(panel_id)
+    panel = service.get_panel(panel_id, include_html=True)
 
     graph = getattr(request.app.state, "graph", None)
     if graph is None:
@@ -131,20 +174,29 @@ async def edit_panel(
         html=panel["html"],
         capabilities=panel["capabilities"],
         instruction=body.instruction,
+        data=panel["data"],
     )
-    if updated is None:
+    if updated.html is None:
         raise HTTPException(
             status_code=422,
-            detail="The assistant could not produce an updated panel for that request.",
+            detail={
+                "message": (
+                    "Panel edit failed validation. The saved panel was not changed."
+                    if updated.browser_validation
+                    else "The assistant could not produce an updated panel for that request."
+                ),
+                "browser_validation": updated.browser_validation,
+            },
         )
 
-    new_html, new_capabilities = updated
-    return service.update_panel(
+    saved = service.update_panel(
         panel_id,
-        html=new_html,
-        capabilities=new_capabilities,
+        html=updated.html,
+        capabilities=updated.capabilities,
+        data=updated.data,
         version_source="ai",
     )
+    return {**saved, "browser_validation": updated.browser_validation}
 
 
 @router.delete("/panels/{panel_id}")

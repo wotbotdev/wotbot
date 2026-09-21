@@ -250,6 +250,7 @@ class ArtifactCollector:
                         title=inputs.get("title", ""),
                         html=html,
                         capabilities=capabilities,
+                        data=result.get("data") or {},
                         source_thread_id=self.thread_id,
                     )
                     version = session.scalar(

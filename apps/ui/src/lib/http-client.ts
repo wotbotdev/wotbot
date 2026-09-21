@@ -1,3 +1,14 @@
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly detail: unknown,
+  ) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
 export async function httpClient(
   path: string,
   options: RequestInit = {},
@@ -15,7 +26,7 @@ export async function httpClient(
     const body = await res.json().catch(() => ({}));
     const detail = (body as { detail?: unknown }).detail;
     if (typeof detail === 'string') {
-      throw new Error(detail);
+      throw new HttpError(detail, res.status, detail);
     }
     if (
       detail &&
@@ -27,9 +38,9 @@ export async function httpClient(
         'errors' in detail && Array.isArray(detail.errors)
           ? ` ${detail.errors.join(' ')}`
           : '';
-      throw new Error(`${detail.message}${errors}`);
+      throw new HttpError(`${detail.message}${errors}`, res.status, detail);
     }
-    throw new Error(`Request failed (${res.status})`);
+    throw new HttpError(`Request failed (${res.status})`, res.status, detail);
   }
   return res;
 }
