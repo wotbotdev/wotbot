@@ -65,6 +65,7 @@ function EmbedStream({
   history,
   mediaSession,
   prefillRequest,
+  reasoningEffort,
   submittedPrefillIdsRef,
 }: {
   appliedPrefillIdsRef: { current: Set<number> };
@@ -72,6 +73,7 @@ function EmbedStream({
   history: ThreadHistory;
   mediaSession: ReturnType<typeof useMediaIngressSession>;
   prefillRequest: EmbedChatPrefillRequest | null;
+  reasoningEffort: string | null;
   submittedPrefillIdsRef: { current: Set<number> };
 }) {
   const {
@@ -82,7 +84,11 @@ function EmbedStream({
     runtime,
     stream,
     submitText,
-  } = useWotbotRuntime({ threadId: chatId, initialValues: history.values });
+  } = useWotbotRuntime({
+    threadId: chatId,
+    initialValues: history.values,
+    reasoningEffort: reasoningEffort ?? undefined,
+  });
 
   // Applies a queued prefill to the composer, and submits it when asked.
   useEffect(() => {
@@ -135,6 +141,7 @@ function EmbedSurface({
   mediaSession,
   onHistorySettled,
   prefillRequest,
+  reasoningEffort,
   settleAfterLive,
   submittedPrefillIdsRef,
 }: {
@@ -143,6 +150,7 @@ function EmbedSurface({
   mediaSession: ReturnType<typeof useMediaIngressSession>;
   onHistorySettled: () => void;
   prefillRequest: EmbedChatPrefillRequest | null;
+  reasoningEffort: string | null;
   settleAfterLive: boolean;
   submittedPrefillIdsRef: { current: Set<number> };
 }) {
@@ -177,6 +185,7 @@ function EmbedSurface({
       history={history}
       mediaSession={mediaSession}
       prefillRequest={prefillRequest}
+      reasoningEffort={reasoningEffort}
       submittedPrefillIdsRef={submittedPrefillIdsRef}
     />
   );
@@ -198,11 +207,13 @@ export function EmbedChatExperience({
   chatId,
   embedTheme,
   initialPrefill,
+  reasoningEffort,
 }: {
   allowedPrefillOrigins: string[];
   chatId: string;
   embedTheme: Theme | null;
   initialPrefill: EmbedChatPrefill | null;
+  reasoningEffort: string | null;
 }) {
   const cleanupRequestedRef = useRef(false);
   const initialPrefillAppliedRef = useRef(false);
@@ -348,6 +359,7 @@ export function EmbedChatExperience({
             mediaSession={mediaSession}
             onHistorySettled={handleHistorySettled}
             prefillRequest={prefillRequest}
+            reasoningEffort={reasoningEffort}
             settleAfterLive={settleHistoryChatId === chatId}
             submittedPrefillIdsRef={submittedPrefillIdsRef}
           />

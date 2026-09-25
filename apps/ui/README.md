@@ -65,7 +65,7 @@ Most UI settings are backend URLs and shared internal credentials. See [`src/lib
 
 ### Reasoning Effort
 
-`REASONING_EFFORT_ENABLED`, `REASONING_EFFORT_LEVELS` (comma-separated), and `REASONING_EFFORT_DEFAULT` control the reasoning-effort selector in the full chat toolbar ([`src/components/wotbot/chat-route/reasoning-effort-select.tsx`](./src/components/wotbot/chat-route/reasoning-effort-select.tsx); parsing lives in [`src/lib/reasoning-effort.ts`](./src/lib/reasoning-effort.ts)). The selector is hidden entirely unless enabled and at least one level is configured; it's absent from embedded chat by design. The selected level is submitted as ordinary LangGraph state on every subsequent run and persists in `localStorage` across reloads.
+`REASONING_EFFORT_ENABLED`, `REASONING_EFFORT_LEVELS` (comma-separated), and `REASONING_EFFORT_DEFAULT` control the reasoning-effort selector in the full chat toolbar ([`src/components/wotbot/chat-route/reasoning-effort-select.tsx`](./src/components/wotbot/chat-route/reasoning-effort-select.tsx); parsing lives in [`src/lib/reasoning-effort.ts`](./src/lib/reasoning-effort.ts)). The selector is hidden entirely unless enabled and at least one level is configured; embedded chat has no selector and submits the default level instead (see [Embedded Chat](#embedded-chat)). The selected level is submitted as ordinary LangGraph state on every subsequent run and persists in `localStorage` across reloads.
 
 The chat page reads these values on the server from the container's runtime environment and passes a serialized configuration to the client. The UI and backend therefore use the same shared variables from the root `.env`; the published UI image does not need to be rebuilt for a different selector configuration. The backend still independently validates every requested level against its allow-list.
 
@@ -88,6 +88,14 @@ Add `jobEvents=0` to suppress the global job notification event stream
 ```
 
 The disabled values are `0`, `false`, `no`, and `off`.
+
+When reasoning effort is enabled, embedded chat submits `REASONING_EFFORT_DEFAULT`
+with every run. Add `effort=<level>` to choose another configured level; values
+not in `REASONING_EFFORT_LEVELS` fall back to the default:
+
+```text
+/embed/chat?effort=high
+```
 
 The route also accepts runtime prefill messages from its parent frame:
 

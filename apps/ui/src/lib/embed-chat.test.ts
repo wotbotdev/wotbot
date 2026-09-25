@@ -11,9 +11,11 @@ import {
   normalizeEmbedPrefillPrompt,
 } from './embed-chat';
 import { parseEmbedChatAllowedOrigins } from './embed-chat-runtime-config';
+import { DISABLED_REASONING_EFFORT_CONFIG } from './reasoning-effort';
 import {
   areEmbedJobEventsEnabledFromSearchParams,
   getEmbedInitialPrefillFromSearchParams,
+  getEmbedReasoningEffortFromSearchParams,
   getEmbedThemeFromSearchParams,
   toSearchParamsString,
 } from './embed-chat-search-params';
@@ -114,6 +116,40 @@ test('getEmbedThemeFromSearchParams ignores unsupported theme values', () => {
   assert.equal(getEmbedThemeFromSearchParams({}), null);
   assert.equal(getEmbedThemeFromSearchParams({ theme: 'auto' }), null);
   assert.equal(getEmbedThemeFromSearchParams({ theme: '' }), null);
+});
+
+test('embed reasoning effort takes an allowed effort param or the configured default', () => {
+  const config = {
+    enabled: true,
+    levels: ['low', 'medium', 'high'],
+    defaultLevel: 'medium',
+  };
+  assert.equal(getEmbedReasoningEffortFromSearchParams({}, config), 'medium');
+  assert.equal(
+    getEmbedReasoningEffortFromSearchParams({ effort: ' high ' }, config),
+    'high',
+  );
+  assert.equal(
+    getEmbedReasoningEffortFromSearchParams({ effort: 'max' }, config),
+    'medium',
+  );
+});
+
+test('embed reasoning effort is omitted while the feature is disabled', () => {
+  assert.equal(
+    getEmbedReasoningEffortFromSearchParams(
+      { effort: 'high' },
+      DISABLED_REASONING_EFFORT_CONFIG,
+    ),
+    null,
+  );
+  assert.equal(
+    getEmbedReasoningEffortFromSearchParams(
+      { effort: 'high' },
+      { enabled: false, levels: ['high'], defaultLevel: 'high' },
+    ),
+    null,
+  );
 });
 
 test('parseEmbedChatAllowedOrigins normalizes exact http origins', () => {

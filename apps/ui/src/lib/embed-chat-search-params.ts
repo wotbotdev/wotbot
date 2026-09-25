@@ -5,6 +5,10 @@ import {
   normalizeEmbedPrefillPrompt,
 } from './embed-chat';
 import type { Theme } from '@/components/theme-provider';
+import {
+  isReasoningEffortSelectorEnabled,
+  type ReasoningEffortConfig,
+} from './reasoning-effort';
 
 export type AppPageSearchParams = Record<string, string | string[] | undefined>;
 const OMITTED_EMBED_ROUTE_PARAMS = new Set(['examples']);
@@ -78,4 +82,25 @@ export function getEmbedInitialPrefillFromSearchParams(
     prompt,
     submit: isEmbedAutosubmitValue(getFirstValue(searchParams.autosubmit)),
   };
+}
+
+/**
+ * The reasoning effort an embedded chat submits with every run.
+ *
+ * The embed has no selector, so the host page picks a level with `effort=`;
+ * anything not on the configured list falls back to the configured default,
+ * the same level the full chat starts at. Nothing is sent while the feature
+ * is disabled, matching the full chat.
+ */
+export function getEmbedReasoningEffortFromSearchParams(
+  searchParams: AppPageSearchParams,
+  config: ReasoningEffortConfig,
+): string | null {
+  if (!isReasoningEffortSelectorEnabled(config)) {
+    return null;
+  }
+  const requested = getFirstValue(searchParams.effort)?.trim();
+  return requested && config.levels.includes(requested)
+    ? requested
+    : config.defaultLevel;
 }

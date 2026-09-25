@@ -30,6 +30,7 @@ export function ChatRoutePage({
   chatId,
   mode,
   embedQueryString = '',
+  embedReasoningEffort = null,
   embedTheme = null,
   initialEmbedPrefill = null,
   reasoningEffortConfig = DISABLED_REASONING_EFFORT_CONFIG,
@@ -38,6 +39,7 @@ export function ChatRoutePage({
   chatId: string;
   mode: ChatRouteMode;
   embedQueryString?: string;
+  embedReasoningEffort?: string | null;
   embedTheme?: Theme | null;
   initialEmbedPrefill?: EmbedChatPrefill | null;
   reasoningEffortConfig?: ReasoningEffortConfig;
@@ -64,6 +66,7 @@ export function ChatRoutePage({
       chatId={chatId}
       embedTheme={embedTheme}
       initialPrefill={initialEmbedPrefill}
+      reasoningEffort={embedReasoningEffort}
     />
   ) : (
     <FullChatExperience
@@ -79,11 +82,13 @@ export function EmbedChatPage({
   embedQueryString = '',
   embedTheme = null,
   initialPrefill = null,
+  reasoningEffort = null,
 }: {
   allowedPrefillOrigins?: string[];
   embedQueryString?: string;
   embedTheme?: Theme | null;
   initialPrefill?: EmbedChatPrefill | null;
+  reasoningEffort?: string | null;
 }) {
   const [chatId] = useState(() => createEmbedEphemeralChatId());
 
@@ -93,6 +98,7 @@ export function EmbedChatPage({
       chatId={chatId}
       mode="embed"
       embedQueryString={embedQueryString}
+      embedReasoningEffort={reasoningEffort}
       embedTheme={embedTheme}
       initialEmbedPrefill={initialPrefill}
     />
