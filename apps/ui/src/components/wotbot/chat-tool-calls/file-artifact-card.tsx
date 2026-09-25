@@ -40,6 +40,19 @@ function useHasExpired(expiresAt: number): boolean {
   );
 }
 
+const relativeTime = new Intl.RelativeTimeFormat(undefined, {
+  numeric: 'auto',
+});
+
+/** "in 23 hours", "in 5 minutes": when the file lapses, at a glance. */
+function formatExpiry(expiresAt: number): string {
+  const minutes = Math.round((expiresAt - Date.now()) / 60_000);
+  if (Math.abs(minutes) < 60) return relativeTime.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 48) return relativeTime.format(hours, 'hour');
+  return relativeTime.format(Math.round(hours / 24), 'day');
+}
+
 export function FileArtifactCard({ artifact }: { artifact: RunCodeArtifact }) {
   const size = artifact.size_bytes;
   const sizeLabel =
@@ -53,9 +66,6 @@ export function FileArtifactCard({ artifact }: { artifact: RunCodeArtifact }) {
   const expiresAt = artifact.expires_at
     ? Date.parse(artifact.expires_at)
     : Number.NaN;
-  const expires = Number.isFinite(expiresAt)
-    ? new Date(expiresAt).toUTCString()
-    : null;
   const expired = useHasExpired(expiresAt);
 
   return (
@@ -66,9 +76,12 @@ export function FileArtifactCard({ artifact }: { artifact: RunCodeArtifact }) {
         <p className="text-xs text-muted-foreground">
           {[sizeLabel, artifact.mime_type].filter(Boolean).join(' · ')}
         </p>
-        {expires ? (
-          <p className="text-xs text-muted-foreground">
-            {expired ? 'Expired on' : 'Available until'} {expires}
+        {Number.isFinite(expiresAt) && !expired ? (
+          <p
+            className="text-xs text-muted-foreground"
+            title={new Date(expiresAt).toLocaleString()}
+          >
+            Expires {formatExpiry(expiresAt)}
           </p>
         ) : null}
       </div>

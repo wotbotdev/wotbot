@@ -78,6 +78,31 @@ const ARTIFACT_TOOLS: ReadonlySet<string> = new Set([
  */
 export const ARTIFACT_VIEW_NAME = '__wotbot_artifact__';
 
+/**
+ * Synthetic part that offers a `run_code` call's files for download.
+ *
+ * A chart or panel belongs where the prose refers to it, but a file is a
+ * deliverable, like the device summary: it goes after the turn's answer, one
+ * part per call, so the downloads read as a single block closing the turn.
+ */
+export const FILE_VIEW_NAME = '__wotbot_files__';
+
+/**
+ * Whether a `run_code` result carries files, in either of the shapes the
+ * executor reports them. Validating each file is the renderer's job; this only
+ * keeps a turn without files from growing an empty block.
+ */
+function hasFileArtifacts(result: unknown): boolean {
+  if (!isRecord(result)) return false;
+  if (Array.isArray(result.files) && result.files.length) return true;
+  return (
+    Array.isArray(result.artifacts) &&
+    result.artifacts.some(
+      (artifact) => isRecord(artifact) && artifact.kind === 'file',
+    )
+  );
+}
+
 export type GroupedToolCall = {
   id: string;
   name: string;
@@ -245,6 +270,33 @@ function convertThreadMessages(
         }
       }
       placed.push(...pending);
+      // Files close the turn, after the answer and before a trailing summary,
+      // which still reads as the last word on what changed.
+      const downloads: ContentPart[] = [];
+      for (const part of placed) {
+        if (
+          part.type === 'tool-call' &&
+          part.toolName === 'run_code' &&
+          !part.isError &&
+          hasFileArtifacts(part.result)
+        ) {
+          downloads.push({
+            type: 'tool-call',
+            toolCallId: uniquePartId(`files:${part.toolCallId}`),
+            toolName: FILE_VIEW_NAME,
+            args: {},
+            result: part.result,
+          });
+        }
+      }
+      let end = placed.length;
+      while (
+        end > 0 &&
+        placed[end - 1].type === 'tool-call' &&
+        (placed[end - 1] as ToolCallPart).toolName === WOT_SUMMARY_NAME
+      )
+        end -= 1;
+      placed.splice(end, 0, ...downloads);
       turn.parts = placed;
     }
     // A turn with no parts would render as an empty bubble.

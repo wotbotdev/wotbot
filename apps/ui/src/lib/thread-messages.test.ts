@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   ARTIFACT_VIEW_NAME,
+  FILE_VIEW_NAME,
   WOT_SUMMARY_NAME,
   createThreadMessageConverter,
   toThreadMessages,
@@ -471,6 +472,90 @@ test('each artifact sits with the run that produced it', () => {
   );
 });
 
+test('files close the turn, after the answer and before the summary', () => {
+  const csv = {
+    artifacts: [
+      { kind: 'plotly', ref: 'chart_1', filename: 'plot.json' },
+      { kind: 'file', ref: 'file_1', id: 'file-a', filename: 'a.csv' },
+    ],
+  };
+  const out = toThreadMessages([
+    {
+      type: 'ai',
+      content: '',
+      tool_calls: [{ id: 'a', name: 'run_code', args: {} }],
+    },
+    { type: 'tool', tool_call_id: 'a', content: JSON.stringify(csv) },
+    {
+      type: 'ai',
+      content: 'The chart above shows the trend.',
+      tool_calls: [{ id: 'b', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'b',
+      content: '{"files":[{"id":"file-b","filename":"b.csv"}]}',
+    },
+    { type: 'ai', content: 'Both exports are ready.' },
+    {
+      type: 'ai',
+      content: JSON.stringify({
+        type: 'wotbot_device_interactions',
+        interactions: [
+          {
+            affordanceName: 'running',
+            ok: true,
+            thingId: 'conveyor',
+            type: 'property',
+          },
+        ],
+      }),
+    },
+  ]);
+
+  // The chart stays with its prose; both calls' files follow the answer.
+  assert.deepEqual(
+    parts(out[0]).map((part) => part.toolName ?? part.type),
+    [
+      'run_code',
+      ARTIFACT_VIEW_NAME,
+      'text',
+      'run_code',
+      ARTIFACT_VIEW_NAME,
+      'text',
+      FILE_VIEW_NAME,
+      FILE_VIEW_NAME,
+      WOT_SUMMARY_NAME,
+    ],
+  );
+  const files = parts(out[0]).filter(
+    (part) => part.toolName === FILE_VIEW_NAME,
+  );
+  assert.deepEqual(files[0].result, csv);
+});
+
+test('a run without files adds no download part', () => {
+  const out = toThreadMessages([
+    {
+      type: 'ai',
+      content: '',
+      tool_calls: [{ id: 'a', name: 'run_code', args: {} }],
+    },
+    {
+      type: 'tool',
+      tool_call_id: 'a',
+      content:
+        '{"artifacts":[{"kind":"image","ref":"image_1","filename":"x.png"}]}',
+    },
+    { type: 'ai', content: 'Here is the plot.' },
+  ]);
+
+  assert.equal(
+    parts(out[0]).some((part) => part.toolName === FILE_VIEW_NAME),
+    false,
+  );
+});
+
 test('a tool call with no id is skipped rather than left unanswerable', () => {
   // Its result arrives keyed by the provider's id, so a synthesized one would
   // never match and the card would sit at "executing" forever.
@@ -524,7 +609,9 @@ test('streaming preserves completed messages, tool results and unchanged active 
     groupCalls(next[3])[0].result,
     groupCalls(first[3])[0].result,
   );
-  assert.equal(parts(first[3]).at(-1)?.text, 'Saved');
+  assert.equal(parts(first[3]).at(-2)?.text, 'Saved');
+  assert.equal(parts(first[3]).at(-1)?.toolName, FILE_VIEW_NAME);
+  assert.strictEqual(parts(next[3]).at(-1), parts(first[3]).at(-1));
 });
 
 test('cached conversion matches fresh conversion through streaming, edits, recovery and late results', () => {

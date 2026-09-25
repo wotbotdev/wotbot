@@ -2,6 +2,7 @@
 
 import type { ToolCallMessagePartProps } from '@assistant-ui/react';
 
+import { FileArtifactCard } from '@/components/wotbot/chat-tool-calls/file-artifact-card';
 import { GenericToolCallCard } from '@/components/wotbot/chat-tool-calls/generic-tool-call-card';
 import {
   RunCodeArtifacts,
@@ -16,13 +17,18 @@ import {
   normalizeWebInterfaceResult,
 } from '@/components/wotbot/chat-tool-calls/web-interface-model';
 import {
+  artifactKey,
   hasErrorResult,
   normalizeRunCodeResult,
   type CatchAllToolCallRenderProps,
   type ToolCallStatus,
 } from '@/components/wotbot/chat-tool-call-model';
 import { useReportToolCall } from '@/components/wotbot/assistant/thought-group';
-import { ARTIFACT_VIEW_NAME, WOT_SUMMARY_NAME } from '@/lib/thread-messages';
+import {
+  ARTIFACT_VIEW_NAME,
+  FILE_VIEW_NAME,
+  WOT_SUMMARY_NAME,
+} from '@/lib/thread-messages';
 import { WotInteractionSummaryCard } from '@/components/wotbot/wot-summary/wot-interaction-summary-card';
 import type { WotInteraction } from '@/lib/wot-interactions';
 
@@ -83,8 +89,9 @@ export function GroupedToolCall(props: ToolCallMessagePartProps) {
 /**
  * A part that belongs outside the thought block, at full width.
  *
- * Either an artifact split off from the call that produced it, or the device-
- * interaction summary, which is a statement of what changed rather than working.
+ * An artifact split off from the call that produced it, the files a call
+ * offers for download, or the device-interaction summary, which is a statement
+ * of what changed rather than working.
  */
 export function StandaloneToolCall(props: ToolCallMessagePartProps) {
   if (props.toolName === ARTIFACT_VIEW_NAME) {
@@ -94,10 +101,14 @@ export function StandaloneToolCall(props: ToolCallMessagePartProps) {
     };
 
     if (source === 'run_code') {
+      // Files are offered at the end of the turn instead; see FILE_VIEW_NAME.
       const result = normalizeRunCodeResult(props.result);
-      return result.artifacts?.length ? (
+      const visuals = result.artifacts?.filter(
+        (artifact) => artifact.kind !== 'file',
+      );
+      return visuals?.length ? (
         <div className="my-1">
-          <RunCodeArtifacts result={result} />
+          <RunCodeArtifacts result={{ ...result, artifacts: visuals }} />
         </div>
       ) : null;
     }
@@ -114,6 +125,15 @@ export function StandaloneToolCall(props: ToolCallMessagePartProps) {
         />
       </div>
     ) : null;
+  }
+
+  if (props.toolName === FILE_VIEW_NAME) {
+    const files = normalizeRunCodeResult(props.result).artifacts?.filter(
+      (artifact) => artifact.kind === 'file',
+    );
+    return files?.map((artifact) => (
+      <FileArtifactCard artifact={artifact} key={artifactKey(artifact)} />
+    ));
   }
 
   if (props.toolName === WOT_SUMMARY_NAME) {
