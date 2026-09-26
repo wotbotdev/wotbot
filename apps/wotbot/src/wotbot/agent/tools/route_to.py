@@ -30,13 +30,13 @@ def make_route_to_tool() -> Any:
         intent: HandoffIntent,
         tool_call_id: Annotated[str, InjectedToolCallId],
     ) -> Command:
-        """Continue this turn in another branch once the current task is done.
+        """Continue this turn in another branch with the needed tools.
 
-        Call this only when the current task is complete and the user's request
-        clearly needs follow-up work handled by a different area:
+        Call when this branch lacks tools required for the user's task, or when
+        the current part is complete and follow-up work belongs to another area:
 
         - ``control``: perform a Thing action or build a control panel.
-        - ``analysis``: read, explore, visualise, or compute over data.
+        - ``analysis``: use run_code to prepare data, invoke models, or visualise results.
         - ``jobs``: create, inspect, run, or debug an automation job.
         - ``virtual_things``: create, update, or test a computed/virtual Thing.
 

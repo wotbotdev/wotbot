@@ -1,3 +1,6 @@
+import importlib
+import os
+
 from wotbot.discovery.providers.base import DiscoveryProvider
 from wotbot.discovery.providers.dcat import DcatProvider
 from wotbot.discovery.providers.edc_v3 import EdcV3Provider, edr_ttl
@@ -22,6 +25,32 @@ PROVIDERS: dict[str, DiscoveryProvider] = {
         OpenApiProvider(),
     )
 }
+
+
+def _load_external_providers() -> None:
+    """Load deployment-owned providers named by module:attribute.
+
+    The modules must already be on PYTHONPATH. Discovery source configuration
+    cannot import code; only an operator-controlled environment variable can.
+    """
+
+    for entry in os.environ.get("WOTBOT_DISCOVERY_PROVIDER_MODULES", "").split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        module_name, separator, attribute = entry.partition(":")
+        if not separator or not module_name or not attribute:
+            raise ValueError(f"Invalid discovery provider module: {entry!r}")
+        provider_type = getattr(importlib.import_module(module_name), attribute)
+        provider = provider_type() if isinstance(provider_type, type) else provider_type
+        if not isinstance(provider, DiscoveryProvider):
+            raise TypeError(f"External discovery provider {entry!r} is invalid")
+        if provider.name in PROVIDERS:
+            raise ValueError(f"Duplicate discovery provider: {provider.name}")
+        PROVIDERS[provider.name] = provider
+
+
+_load_external_providers()
 
 __all__ = [
     "PROVIDERS",

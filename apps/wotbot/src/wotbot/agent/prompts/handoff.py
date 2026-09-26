@@ -1,16 +1,19 @@
 """Prompt snippet enabling branch-to-branch handoff.
 
 Appended to the action-branch system prompts (control, analysis, jobs,
-virtual_things) only when ``agent_handoff_enabled`` is set. It tells the model
+virtual_things, discovery) only when ``agent_handoff_enabled`` is set. It tells the model
 how to continue into another branch via the ``route_to`` tool.
 """
 
 HANDOFF_PROMPT = """\
 
-## Continuing Into Another Task
-If the user's request implies follow-up work that belongs to a different area, \
-finish the current task first, then call `route_to` once with the appropriate \
-intent and stop. The handoff happens automatically — do not narrate it.
+## Continuing In Another Branch
+If the task requires tools that are unavailable in this branch, call `route_to` \
+with the branch that has them and stop. For example, aggregation and model \
+input preparation need analysis and its run_code tool. Hand off before \
+fetching large histories or repeating inspections that cannot complete the task.
+When finishing one part of a request exposes follow-up work in another area, \
+complete the current part, then hand off. The handoff happens automatically.
 
 Valid intents:
 - **control**: perform a Thing action or build a control panel/widget.
@@ -18,7 +21,6 @@ Valid intents:
 - **jobs**: create, inspect, run, or debug an automation job.
 - **virtual_things**: create, update, or test a computed/virtual Thing.
 
-Only hand off when the current task is genuinely complete and more work is \
-clearly needed. If nothing further is required, do not call `route_to` — just \
-finish your response.
+Only hand off when another branch's tools are needed. If the request is \
+complete, finish your response.
 """

@@ -1,5 +1,6 @@
 ROUTER_PROMPT = """\
-Classify the user's message into exactly one intent.
+Classify the latest user request into exactly one intent. Use earlier turns \
+to resolve references; choose tools for the outcome requested now.
 
 - **chat**: Greetings, general questions, small talk, help requests. Only use \
 this when the user is NOT asking about the state, data, or capabilities of a \
@@ -18,6 +19,12 @@ monitoring interface to view Thing data. If the user asks to find or use a SPARQ
 Thing, RDF graph, knowledge graph, or RDF entity, classify as analysis. \
 If the user is asking about operational or real-world state represented by a \
 Thing, prefer analysis over chat. \
+Forecasting, prediction, simulation, aggregation, and running models on \
+measurement data are analysis, including requests that invoke a Thing action \
+to obtain the result. Analysis has code execution for preparing inputs and \
+calling data/model services. The word "action" in a WoT contract alone does \
+not make a request control; classify by the intended result. For example, \
+"aggregate sensor history and invoke a forecasting service" is analysis. \
 Analysis covers data reachable through Things already in the catalog; asking \
 what an external source offers before anything is onboarded is **discovery**.
 - **jobs**: Create, list, inspect, run, debug, delete, or explain automation jobs. \

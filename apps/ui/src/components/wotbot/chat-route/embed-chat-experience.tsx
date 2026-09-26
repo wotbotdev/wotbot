@@ -3,6 +3,7 @@
 import { AssistantRuntimeProvider } from '@assistant-ui/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useChatInterruptPrompt } from '@/components/wotbot/assistant/use-chat-interrupt-prompt';
 import {
   ThreadErrorNotice,
   WotbotThread,
@@ -18,6 +19,7 @@ import { WelcomeScreen } from '@/components/wotbot/welcome-screen';
 import { useMediaIngressSession } from '@/hooks/use-media-ingress-session';
 import {
   type EmbedChatPrefill,
+  isEmbedEphemeralChatId,
   normalizeEmbedPrefillPrompt,
 } from '@/lib/embed-chat';
 import { useTheme, type Theme } from '@/components/theme-provider';
@@ -89,6 +91,7 @@ function EmbedStream({
     initialValues: history.values,
     reasoningEffort: reasoningEffort ?? undefined,
   });
+  const pendingSlot = useChatInterruptPrompt(stream);
 
   // Applies a queued prefill to the composer, and submits it when asked.
   useEffect(() => {
@@ -104,6 +107,7 @@ function EmbedStream({
     if (
       prefillRequest.submit &&
       !stream.isLoading &&
+      !stream.interrupts.length &&
       !submittedPrefillIdsRef.current.has(prefillRequest.id)
     ) {
       submittedPrefillIdsRef.current.add(prefillRequest.id);
@@ -115,6 +119,7 @@ function EmbedStream({
     prefillRequest,
     runtime,
     stream.isLoading,
+    stream.interrupts.length,
     submitText,
     submittedPrefillIdsRef,
   ]);
@@ -122,12 +127,18 @@ function EmbedStream({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <WotbotThread
+        pendingSlot={pendingSlot}
         className="wotbot-chat embed-chat-frame flex-1"
         emptyState={<WelcomeScreen historyLoaded />}
         emptyComposerSlot={<MediaIngressControl session={mediaSession} />}
         error={runError}
         isRetrying={isRecovering}
         onRetry={() => void retryRecovery()}
+        placeholder={
+          pendingSlot
+            ? 'Answer the request above to continue...'
+            : 'Ask about your Things, data, or automations...'
+        }
         rerunConfirmation={rerunConfirmation}
       />
     </AssistantRuntimeProvider>
@@ -216,6 +227,7 @@ export function EmbedChatExperience({
   reasoningEffort: string | null;
 }) {
   const cleanupRequestedRef = useRef(false);
+  const resetInFlightRef = useRef(false);
   const initialPrefillAppliedRef = useRef(false);
   const appliedPrefillIdsRef = useRef<Set<number>>(new Set());
   const lastQueuedPrefillRef = useRef<{
@@ -292,6 +304,43 @@ export function EmbedChatExperience({
         return;
       }
 
+      // Await deletion (and server-side run cancellation) before the parent
+      // resets its demo state. Only this iframe's own ephemeral chat is touched.
+      if (
+        event.data?.type === 'deck:reset' &&
+        typeof event.data.requestId === 'string' &&
+        event.data.requestId.length <= 100
+      ) {
+        const requestId = event.data.requestId;
+        if (!isEmbedEphemeralChatId(chatId)) {
+          window.parent.postMessage({ type: 'wotbot:reset', requestId, ok: false }, event.origin);
+          return;
+        }
+        if (resetInFlightRef.current) return;
+        resetInFlightRef.current = true;
+        cleanupRequestedRef.current = true;
+        void (async () => {
+          let ok = false;
+          try {
+            const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
+              method: 'DELETE',
+            });
+            ok = response.ok;
+          } catch {
+            // The parent must not reset shared state unless cancellation worked.
+          } finally {
+            cleanupRequestedRef.current = ok;
+            resetInFlightRef.current = false;
+            window.parent.postMessage(
+              { type: 'wotbot:reset', requestId, ok },
+              event.origin,
+            );
+          }
+        })();
+        return;
+      }
+
+      if (cleanupRequestedRef.current) return;
       const prefill = getDeckPrefill(event.data);
       if (!prefill) {
         return;
@@ -303,7 +352,7 @@ export function EmbedChatExperience({
     window.addEventListener('message', onMessage);
 
     return () => window.removeEventListener('message', onMessage);
-  }, [isAllowedPrefillOrigin, queuePrefill]);
+  }, [chatId, isAllowedPrefillOrigin, queuePrefill]);
 
   useEffect(() => {
     const cleanupSession = () => {

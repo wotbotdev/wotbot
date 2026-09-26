@@ -14,12 +14,7 @@ import {
   useThreadHistory,
   useWotbotRuntime,
 } from '@/components/wotbot/assistant/use-wotbot-runtime';
-import { parseCredentialChallenge } from '@/components/wotbot/assistant/credential-interrupt-card';
-import {
-  CredentialPrompt,
-  SourceRegistrationPrompt,
-} from '@/components/wotbot/assistant/interrupt-prompt';
-import { parseSourceRegistrationInterrupt } from '@/components/wotbot/assistant/source-registration-interrupt-card';
+import { useChatInterruptPrompt } from '@/components/wotbot/assistant/use-chat-interrupt-prompt';
 import { ReasoningEffortSelect } from '@/components/wotbot/chat-route/reasoning-effort-select';
 import { LiveModePanel } from '@/components/wotbot/live-mode-panel';
 import { MediaIngressControl } from '@/components/wotbot/media-ingress-control';
@@ -73,56 +68,7 @@ function ChatStream({
     reasoningEffort,
     onThreadUpdated,
   });
-  const credentialChallenge = useMemo(
-    () =>
-      stream.interrupts
-        .map((item) => parseCredentialChallenge(item.value))
-        .find((item) => item !== null) ?? null,
-    [stream.interrupts],
-  );
-  const sourceRegistration = useMemo(
-    () =>
-      stream.interrupts
-        .map((item) => parseSourceRegistrationInterrupt(item.value))
-        .find((item) => item !== null) ?? null,
-    [stream.interrupts],
-  );
-  const resumeCredential = useCallback(
-    async (status: 'credential_saved' | 'credential_cancelled') => {
-      await stream.submit(null, { command: { resume: { status } } });
-    },
-    [stream],
-  );
-
-  // The run is suspended until one of these is answered, so the prompt sits at
-  // the end of the transcript rather than above it.
-  const pendingSlot = credentialChallenge ? (
-    <CredentialPrompt
-      challenge={credentialChallenge}
-      onCancel={() => resumeCredential('credential_cancelled')}
-      onSaved={() => resumeCredential('credential_saved')}
-    />
-  ) : sourceRegistration ? (
-    <SourceRegistrationPrompt
-      draft={sourceRegistration.draft}
-      onCancel={() =>
-        stream.submit(null, {
-          command: { resume: { status: 'source_registration_cancelled' } },
-        })
-      }
-      onRegistered={(sourceId, thingId) =>
-        stream.submit(null, {
-          command: {
-            resume: {
-              status: 'source_registered',
-              source_id: sourceId,
-              ...(thingId ? { thing_id: thingId } : {}),
-            },
-          },
-        })
-      }
-    />
-  ) : null;
+  const pendingSlot = useChatInterruptPrompt(stream);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>

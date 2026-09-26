@@ -109,12 +109,12 @@ class _FakeBoundLLM:
 
     async def ainvoke(self, messages):
         # The analysis branch is the only one bound with run_code; return a plain
-        # completion there. The virtual_things branch hands off immediately.
+        # completion there. The initial branch hands off immediately.
         if "run_code" in self._tool_names:
             self._parent.visited.append("analysis")
             return AIMessage(content="analysis complete")
 
-        self._parent.visited.append("virtual_things")
+        self._parent.visited.append(self._parent._intent)
         return AIMessage(
             content="",
             tool_calls=[{"name": "route_to", "args": {"intent": "analysis"}, "id": "call-1"}],
@@ -163,6 +163,22 @@ class GraphWiringTestCase(unittest.TestCase):
 
 
 class HandoffExecutionTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_control_can_recover_into_analysis_with_code_tools(self) -> None:
+        llm = _ScriptedLLM(intent="control")
+        graph = build_graph(
+            llm=llm,
+            registry_tools=[],
+            local_tools=_local_tools(),
+            max_tokens=1000,
+            handoff_enabled=True,
+        )
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="aggregate history and invoke a forecast model")]}
+        )
+        self.assertEqual(llm.visited, ["control", "analysis"])
+        self.assertIsNone(result.get("next"))
+        self.assertIn("analysis complete", [str(m.content) for m in result["messages"]])
+
     async def test_virtual_things_hands_off_into_analysis(self) -> None:
         llm = _ScriptedLLM()
         graph = build_graph(
