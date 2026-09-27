@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import re
 from dataclasses import replace
 from typing import Any
@@ -168,7 +169,8 @@ class DiscoveryService:
     ) -> dict[str, Any]:
         record = await asyncio.to_thread(self._find_source, source_id)
         if record is None:
-            return _source_unavailable(source_id, "The discovery source is no longer registered.")
+            records = await asyncio.to_thread(self._list_source_records)
+            return _source_not_found(source_id, records)
         try:
             source, public_http = await asyncio.to_thread(self._source_runtime, record)
             provider = PROVIDERS.get(source.provider)
@@ -1029,9 +1031,35 @@ def _management_sources(session: Session, records: list[SourceRecord]) -> list[d
     ]
 
 
+# The model copies source ids between tool calls. A full 64-hex digest was
+# regularly truncated or garbled in transit; 16 hex digits (64 bits) stay unique
+# across one deployment's registry and are short enough to copy reliably.
+# Sources registered with the older long ids keep them: lookups use the stored id.
+_SOURCE_ID_HEX_DIGITS = 16
+
+
 def _source_id(provider: str, external_id: str) -> str:
     identity = f"{provider}\0source\0{external_id}".encode()
-    return f"urn:wotbot:source:{provider}:{hashlib.sha256(identity).hexdigest()}"
+    digest = hashlib.sha256(identity).hexdigest()[:_SOURCE_ID_HEX_DIGITS]
+    return f"urn:wotbot:source:{provider}:{digest}"
+
+
+def _source_not_found(source_id: str, records: list[SourceRecord]) -> dict[str, Any]:
+    """Name the registered sources closest to a mistyped id so the caller can retry."""
+
+    def shared_prefix(record: SourceRecord) -> int:
+        return len(os.path.commonprefix([record.id, source_id]))
+
+    closest = sorted(records, key=lambda record: (-shared_prefix(record), record.title))
+    return {
+        "status": "source_not_found",
+        "source_id": source_id,
+        "items": [],
+        "message": "No registered source has this id. Retry with one of known_sources.",
+        "known_sources": [
+            {"source_id": record.id, "title": record.title} for record in closest[:10]
+        ],
+    }
 
 
 def _source_config(source: SourceDefinition) -> dict[str, Any]:

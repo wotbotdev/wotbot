@@ -49,7 +49,7 @@ from wotbot.discovery.providers.base import (
 from wotbot.discovery.providers.udata import resources
 from wotbot.discovery.routes import _download_response, _registration_result, router
 from wotbot.discovery.search import prepare_search_intent
-from wotbot.discovery.service import DiscoveryService
+from wotbot.discovery.service import DiscoveryService, _source_id
 from wotbot.discovery.source_models import SourceRecord
 from wotbot.discovery.store import CandidateStore, DownloadStore
 
@@ -504,14 +504,17 @@ class ServiceTestCase(unittest.IsolatedAsyncioTestCase):
 
     async def test_missing_and_failing_sources_return_sanitized_unavailable(self) -> None:
         service = DiscoveryService(Settings())
-        with patch.object(service, "_find_source", return_value=None):
+        with (
+            patch.object(service, "_find_source", return_value=None),
+            patch.object(service, "_list_source_records", return_value=[source_record()]),
+        ):
             missing = await service.discover(
                 source_id="deleted",
                 query="roads",
                 limit=10,
                 thread_id="thread-a",
             )
-        self.assertEqual(missing["status"], "source_unavailable")
+        self.assertEqual(missing["status"], "source_not_found")
         self.assertNotIn("config", json.dumps(missing))
 
         record = source_record()
@@ -1208,3 +1211,48 @@ class PromptBoundaryTestCase(unittest.TestCase):
         self.assertNotIn(
             "seed-things", (repository / "apps" / "wotbot" / "pyproject.toml").read_text()
         )
+
+
+class SourceIdentifierTest(unittest.IsolatedAsyncioTestCase):
+    """Source ids are copied by the model between calls, so they stay short and a
+    mistyped one points back to the real ids instead of reading as deleted."""
+
+    def test_new_source_ids_are_short_and_stable(self) -> None:
+        source_id = _source_id("wot-tdd", "http://ai-service-provider:9000")
+        self.assertRegex(source_id, r"^urn:wotbot:source:wot-tdd:[0-9a-f]{16}$")
+        self.assertEqual(source_id, _source_id("wot-tdd", "http://ai-service-provider:9000"))
+        self.assertNotEqual(source_id, _source_id("wot-tdd", "http://local-energy-provider:9000"))
+
+    async def test_mistyped_id_lists_the_closest_registered_sources_first(self) -> None:
+        dfki = source_record(source_id="urn:wotbot:source:wot-tdd:c43e09fe4ca7c12f")
+        other = source_record(source_id="urn:wotbot:source:udata:0123456789abcdef")
+        service = DiscoveryService(Settings())
+        with (
+            patch.object(service, "_find_source", return_value=None),
+            patch.object(service, "_list_source_records", return_value=[other, dfki]),
+        ):
+            result = await service.discover(
+                source_id="urn:wotbot:source:wot-tdd:c43e09fe4ca7c1",
+                query="",
+                limit=10,
+                thread_id="thread-a",
+            )
+        self.assertEqual(result["status"], "source_not_found")
+        self.assertEqual(result["items"], [])
+        self.assertEqual(
+            [item["source_id"] for item in result["known_sources"]], [dfki.id, other.id]
+        )
+        self.assertEqual(set(result["known_sources"][0]), {"source_id", "title"})
+
+    async def test_sources_with_legacy_long_ids_still_resolve(self) -> None:
+        legacy_id = "urn:wotbot:source:udata:" + "ab" * 32
+        service = DiscoveryService(Settings())
+        with patch.object(
+            service, "_find_source", return_value=source_record(source_id=legacy_id)
+        ) as find:
+            with patch.object(service, "_source_runtime", side_effect=RuntimeError("resolved")):
+                with self.assertRaisesRegex(RuntimeError, "resolved"):
+                    await service.discover(
+                        source_id=legacy_id, query="", limit=10, thread_id="thread-a"
+                    )
+        find.assert_called_once_with(legacy_id)

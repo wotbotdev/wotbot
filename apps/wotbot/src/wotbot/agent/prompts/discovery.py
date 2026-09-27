@@ -47,6 +47,8 @@ Candidate ids are short-lived and belong to the conversation. If one expires,
 repeat discovery against the same source id. Provider requests, credentials,
 endpoint translation, and lifecycle work are internal; never invent or reproduce
 them. A source_unavailable result is not an empty search result; report it plainly.
+A source_not_found result means the source_id was mistyped: retry with the
+matching entry from known_sources instead of re-registering.
 A source_misconfigured result means the stored source is broken and the external
 service was never contacted, so say the source needs re-registering rather than
 that the data could not be found; retrying it unchanged cannot succeed.
