@@ -1046,7 +1046,7 @@ class ProviderTestCase(unittest.IsolatedAsyncioTestCase):
     def test_provider_schemas_and_credential_headers_remain_secret_free(self) -> None:
         self.assertEqual(
             set(PROVIDERS),
-            {"udata", "dcat", "toolhive", "edc-v3", "tx-bootstrap", "openapi"},
+            {"udata", "dcat", "toolhive", "edc-v3", "tx-bootstrap", "openapi", "wot-tdd"},
         )
         schema = PROVIDERS["edc-v3"].registration_schema()
         self.assertEqual(schema["default_security_scheme"], "apikey")

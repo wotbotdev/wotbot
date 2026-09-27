@@ -55,6 +55,8 @@ and its vocabulary is used throughout the code without further explanation.
 and [MCP](https://modelcontextprotocol.io/) are agent-to-agent and agent-to-tool
 protocols WoTBot both speaks and exposes. [DCAT](https://www.w3.org/TR/vocab-dcat-3/)
 and [uData](https://github.com/opendatateam/udata) are open-data catalog standards.
+A [WoT Thing Description Directory](https://www.w3.org/TR/wot-discovery/#exploration-directory-api)
+(TDD) is the W3C WoT Discovery service that lists registered TDs.
 [EDC](https://eclipse-edc.github.io/documentation/) is the Eclipse Dataspace
 Connector, where access to a dataset is negotiated against an
 [ODRL](https://www.w3.org/TR/odrl-model/) policy before any transfer.
@@ -139,12 +141,19 @@ the Thing catalog. The agent first uses `sources_search`, then searches exactly
 one selected source with `discover_external`, and finally uses
 `onboard_candidate` to create a resource Thing.
 
-Built-in providers cover ToolHive, uData, bounded DCAT catalogs, the EDC v3
-Management API, and direct OpenAPI 3.0/3.1 or Swagger 2.0 documents. uData portals
-are detected through a generic API probe. ToolHive, EDC,
+Built-in providers cover ToolHive, uData, bounded DCAT catalogs, WoT Thing
+Description Directories, the EDC v3 Management API, and direct OpenAPI 3.0/3.1 or
+Swagger 2.0 documents. uData portals are detected through a generic API probe,
+and a TDD through its `/.well-known/wot` introduction. ToolHive, EDC,
 private endpoints, and sources that cannot be detected are registered explicitly
 through the dedicated Sources page or API. Chat-initiated registration always
 opens the same confirmation form before probing or persistence.
+
+A deployment can add its own providers without patching WoTBot: set
+`WOTBOT_DISCOVERY_PROVIDER_MODULES` to a comma-separated list of
+`module:attribute` entries naming `DiscoveryProvider` subclasses or instances on
+`PYTHONPATH`. Only this operator-controlled variable can load code; source
+configuration never can.
 
 The source record contains provider configuration, network policy, semantic
 metadata, and the required security scheme. Secret values are entered in the
@@ -154,8 +163,8 @@ as Things, and are never created at startup.
 
 Source search results are temporary and scoped to the conversation. Onboarding
 one selected result creates one resource Thing linked to its trusted source record:
-a dataset Thing for uData/DCAT, an MCP-backed Thing for ToolHive, or an asset
-Thing for EDC. An OpenAPI source deterministically groups supported operations
+a dataset Thing for uData/DCAT, an MCP-backed Thing for ToolHive, an asset
+Thing for EDC, or the unmodified published TD for a TDD entry. An OpenAPI source deterministically groups supported operations
 and compiles the selected group into ordinary HTTP-backed TD actions; the raw
 specification never enters model context. Generated OpenAPI Things can be
 regenerated explicitly from their detail page after reviewing a bounded diff.

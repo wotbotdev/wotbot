@@ -183,12 +183,15 @@ def test_provider_registers_searches_and_onboards(case: Case, jobs_integration_e
 
 
 def test_toolhive_and_dataspace_providers_need_local_fixtures() -> None:
-    """Record why three providers are absent above rather than silently uncovered.
+    """Record why four providers are absent above rather than silently uncovered.
 
     ToolHive needs a running daemon exposing /api/v1beta/workloads. EDC needs a
     connector plus a management API key, while tx-bootstrap needs a participant
     gateway with a populated federated catalog, so they cannot use a stable
-    generic public fixture. All three are covered by unit tests.
+    generic public fixture. There is no stable public WoT Thing Description
+    Directory either; run one locally (for example Eclipse Thingweb's
+    domus-tdd-api or LinkSmart Thing Directory) to exercise wot-tdd. All four
+    are covered by unit tests.
 
     For EDC, tx-bootstrap provides one. After `up.sh` and `bootstrap.sh`,
     register a private source with the provider's DID in `counter_party_id` --
@@ -214,6 +217,6 @@ def test_toolhive_and_dataspace_providers_need_local_fixtures() -> None:
 
     smoked = {case.provider for case in CASES}
     unsmoked = set(PROVIDERS) - smoked
-    assert unsmoked == {"toolhive", "edc-v3", "tx-bootstrap"}, (
+    assert unsmoked == {"toolhive", "edc-v3", "tx-bootstrap", "wot-tdd"}, (
         f"a provider is neither smoked nor documented as needing a local fixture: {unsmoked}"
     )
