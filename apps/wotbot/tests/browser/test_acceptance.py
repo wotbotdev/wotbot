@@ -29,8 +29,8 @@ pytestmark = pytest.mark.browser
 
 pytest.importorskip("playwright", reason="install the browser extra to run panel acceptance")
 
-from playwright.sync_api import Browser, Page, expect, sync_playwright
-from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import Browser, Page, expect, sync_playwright  # noqa: E402
+from playwright.sync_api import Error as PlaywrightError  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 STARTUP_TIMEOUT = 30.0

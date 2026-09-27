@@ -125,7 +125,10 @@ def _build_const_resolver(tree: ast.AST) -> Callable[[str], Any]:
         exprs = assignments.get(name)
         if not exprs or name in stack:
             return _DYNAMIC
-        lookup = lambda inner: resolve(inner, stack + (name,))
+
+        def lookup(inner: str) -> Any:
+            return resolve(inner, stack + (name,))
+
         value: Any = _UNSET
         for expr in exprs:
             ok, resolved = _eval_literal(expr, lookup)

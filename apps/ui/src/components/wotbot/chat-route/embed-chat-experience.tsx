@@ -313,7 +313,10 @@ export function EmbedChatExperience({
       ) {
         const requestId = event.data.requestId;
         if (!isEmbedEphemeralChatId(chatId)) {
-          window.parent.postMessage({ type: 'wotbot:reset', requestId, ok: false }, event.origin);
+          window.parent.postMessage(
+            { type: 'wotbot:reset', requestId, ok: false },
+            event.origin,
+          );
           return;
         }
         if (resetInFlightRef.current) return;
@@ -322,9 +325,12 @@ export function EmbedChatExperience({
         void (async () => {
           let ok = false;
           try {
-            const response = await fetch(`/api/chats/${encodeURIComponent(chatId)}`, {
-              method: 'DELETE',
-            });
+            const response = await fetch(
+              `/api/chats/${encodeURIComponent(chatId)}`,
+              {
+                method: 'DELETE',
+              },
+            );
             ok = response.ok;
           } catch {
             // The parent must not reset shared state unless cancellation worked.
