@@ -29,7 +29,8 @@ dependencies = [
     "psycopg[binary,pool]>=3.2,<4",
     "sqlalchemy>=2,<3",
     "alembic>=1.18,<2",
-    "taskiq>=0.12,<1",
+    # taskiq-redis 1.2 imports compatibility helpers removed in taskiq 0.13.
+    "taskiq>=0.12.6,<0.13",
     "taskiq-redis>=1.2,<2",
     "pycron>=3.2,<4",
     "python-dotenv>=1.0",

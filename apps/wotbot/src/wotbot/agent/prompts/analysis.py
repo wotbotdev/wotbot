@@ -54,6 +54,22 @@ check through panelChecks, reading the attachment back rather than restating a
 number you already wrote, so a claim the data does not support fails instead of
 being delivered.
 
+## Data preparation and estimates
+Prepare source data for the inspected model contract in run_code. Check units,
+actual timestamp spacing, duplicates and gaps. A different source cadence alone
+is not a reason to stop: aggregate or resample when the contract permits it.
+For interpolation, keep original timestamps as anchors, interpolate by elapsed
+time, stay within observed bounds and respect a documented gap limit. Do not
+bridge excluded gaps or concatenate separate segments as one continuous input.
+Validate target spacing, finite values and minimum length before invoking.
+Preserve the measured series separately and report source cadence, method,
+target cadence and coverage. Interpolated input and model output are estimates,
+not new measurements; resampling does not restore unobserved signal detail.
+When choosing a baseline or a summary method, make a reasonable choice and
+explain it. Keep holdout observations out of fitting and preprocessing estimates.
+Only compare accuracy against observed targets for the same asset and period.
+Keep inference failures visible rather than fabricating substitute outputs.
+
 ## Discovery Tool Choice
 Use things_search when matching on meaning, fuzzy descriptions, location or asset labels, or
 natural-language Thing purpose. Use things_list/things_get for catalog metadata
