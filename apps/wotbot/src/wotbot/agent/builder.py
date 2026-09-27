@@ -171,12 +171,11 @@ def build_graph(
     # exactly as the single-branch graph.
     handoff_note = ""
     if handoff_enabled:
-        route_to = make_route_to_tool()
-        control_tools = control_tools + [route_to]
-        analysis_tools = analysis_tools + [route_to]
-        jobs_tools = jobs_tools + [route_to]
-        virtual_things_tools = virtual_things_tools + [route_to]
-        discovery_tools = discovery_tools + [route_to]
+        control_tools = control_tools + [make_route_to_tool("control")]
+        analysis_tools = analysis_tools + [make_route_to_tool("analysis")]
+        jobs_tools = jobs_tools + [make_route_to_tool("jobs")]
+        virtual_things_tools = virtual_things_tools + [make_route_to_tool("virtual_things")]
+        discovery_tools = discovery_tools + [make_route_to_tool("discovery")]
         handoff_note = HANDOFF_PROMPT
 
     graph = StateGraph(WotbotState)

@@ -270,3 +270,51 @@ class DiscoveryHandoffTestCase(unittest.IsolatedAsyncioTestCase):
             {"name": "route_to", "args": {"intent": "discovery"}, "id": "c", "type": "tool_call"}
         )
         self.assertEqual(command.update["next"], "discovery")
+
+
+class _SelfHandoffBoundLLM:
+    def __init__(self, parent: "_SelfHandoffLLM") -> None:
+        self._parent = parent
+
+    async def ainvoke(self, messages):
+        self._parent.calls += 1
+        if self._parent.calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[{"name": "route_to", "args": {"intent": "analysis"}, "id": "call-1"}],
+            )
+        self._parent.seen = str(messages[-1].content)
+        return AIMessage(content="analysis complete")
+
+
+class _SelfHandoffLLM(_ScriptedLLM):
+    def __init__(self) -> None:
+        super().__init__(intent="analysis")
+        self.calls = 0
+        self.seen = ""
+
+    def bind_tools(self, tools, **_kwargs):
+        return _SelfHandoffBoundLLM(self)
+
+
+class SelfHandoffTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_handoff_to_the_running_branch_continues_it(self) -> None:
+        llm = _SelfHandoffLLM()
+        graph = build_graph(
+            llm=llm,
+            registry_tools=[],
+            local_tools=_local_tools(),
+            max_tokens=1000,
+            handoff_enabled=True,
+        )
+        result = await graph.ainvoke({"messages": [HumanMessage(content="forecast the meter")]})
+        self.assertEqual(llm.calls, 2)
+        self.assertIn("Already in analysis", llm.seen)
+        self.assertIsNone(result.get("next"))
+        self.assertEqual(str(result["messages"][-1].content), "analysis complete")
+
+    def test_route_to_answers_a_self_handoff_without_setting_next(self) -> None:
+        command = make_route_to_tool("analysis").invoke(
+            {"name": "route_to", "args": {"intent": "analysis"}, "id": "c", "type": "tool_call"}
+        )
+        self.assertNotIn("next", command.update)

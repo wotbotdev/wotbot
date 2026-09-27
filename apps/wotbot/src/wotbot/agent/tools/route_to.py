@@ -22,8 +22,13 @@ from wotbot.agent.tools.contracts import tool
 HandoffIntent = Literal["control", "analysis", "jobs", "virtual_things", "discovery"]
 
 
-def make_route_to_tool() -> Any:
-    """Build the ``route_to`` handoff tool."""
+def make_route_to_tool(current_branch: str | None = None) -> Any:
+    """Build the ``route_to`` handoff tool for the branch named ``current_branch``.
+
+    Handing off to the branch that is already running would restart it without
+    its tools having done anything; the model then tends to narrate a plan and
+    stop. Such a call is answered in place and the branch keeps working.
+    """
 
     @tool
     def route_to(
@@ -44,6 +49,17 @@ def make_route_to_tool() -> Any:
 
         After calling this, stop — the handoff happens automatically.
         """
+        if intent == current_branch:
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            f"Already in {intent}. Continue the task now with this branch's tools.",
+                            tool_call_id=tool_call_id,
+                        )
+                    ],
+                }
+            )
         return Command(
             update={
                 "next": intent,
