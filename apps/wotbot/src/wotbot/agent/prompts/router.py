@@ -26,7 +26,9 @@ calling data/model services. The word "action" in a WoT contract alone does \
 not make a request control; classify by the intended result. For example, \
 "aggregate sensor history and invoke a forecasting service" is analysis. \
 Analysis covers data reachable through Things already in the catalog; asking \
-what an external source offers before anything is onboarded is **discovery**.
+what an external source offers before anything is onboarded is **discovery**. \
+Finding a Thing at or from a named provider or source is **discovery** even when \
+the user also wants it analysed; discovery onboards it and hands off.
 - **jobs**: Create, list, inspect, run, debug, delete, or explain automation jobs. \
 This includes time-based jobs, event-based jobs, prompt jobs, analysis jobs, \
 job status, job run history, job "last result" questions, and user-facing \

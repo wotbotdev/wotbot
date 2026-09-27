@@ -19,7 +19,7 @@ from wotbot.agent.tools.contracts import tool
 
 # Intents an action branch may hand off to. Mirrors the dispatch target map in
 # ``builder.build_graph``. ``respond``/chat is intentionally excluded.
-HandoffIntent = Literal["control", "analysis", "jobs", "virtual_things"]
+HandoffIntent = Literal["control", "analysis", "jobs", "virtual_things", "discovery"]
 
 
 def make_route_to_tool() -> Any:
@@ -39,6 +39,8 @@ def make_route_to_tool() -> Any:
         - ``analysis``: use run_code to prepare data, invoke models, or visualise results.
         - ``jobs``: create, inspect, run, or debug an automation job.
         - ``virtual_things``: create, update, or test a computed/virtual Thing.
+        - ``discovery``: find and onboard a Thing from a registered external source
+          when it is not in the local catalog.
 
         After calling this, stop — the handoff happens automatically.
         """

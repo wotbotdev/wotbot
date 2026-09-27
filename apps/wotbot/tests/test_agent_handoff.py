@@ -217,3 +217,56 @@ class HandoffExecutionTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@tool("discover_external")
+def _discover_external(source_id: str, query: str) -> str:
+    """Stub external discovery tool."""
+    return "[]"
+
+
+class _NamedThingBoundLLM:
+    def __init__(self, parent: "_NamedThingLLM", tool_names: list[str]) -> None:
+        self._parent = parent
+        self._tool_names = tool_names
+
+    async def ainvoke(self, messages):
+        # Only the discovery branch is bound with discover_external; analysis
+        # finds the named Thing missing locally and hands off to discovery.
+        if "discover_external" in self._tool_names:
+            self._parent.visited.append("discovery")
+            return AIMessage(content="discovery complete")
+        self._parent.visited.append("analysis")
+        return AIMessage(
+            content="",
+            tool_calls=[{"name": "route_to", "args": {"intent": "discovery"}, "id": "call-1"}],
+        )
+
+
+class _NamedThingLLM(_ScriptedLLM):
+    def bind_tools(self, tools, **_kwargs):
+        return _NamedThingBoundLLM(self, [t.name for t in tools])
+
+
+class DiscoveryHandoffTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_analysis_hands_off_to_discovery_for_a_missing_thing(self) -> None:
+        llm = _NamedThingLLM(intent="analysis")
+        graph = build_graph(
+            llm=llm,
+            registry_tools=[],
+            local_tools=[*_local_tools(), _discover_external],
+            max_tokens=1000,
+            handoff_enabled=True,
+        )
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="find the meter at the provider and analyse it")]}
+        )
+        self.assertEqual(llm.visited, ["analysis", "discovery"])
+        self.assertIsNone(result.get("next"))
+        self.assertIn("discovery complete", [str(m.content) for m in result["messages"]])
+
+    def test_route_to_accepts_discovery(self) -> None:
+        command = make_route_to_tool().invoke(
+            {"name": "route_to", "args": {"intent": "discovery"}, "id": "c", "type": "tool_call"}
+        )
+        self.assertEqual(command.update["next"], "discovery")
