@@ -35,11 +35,15 @@ export function ArtifactPreview({
   artifact,
   fullscreen = false,
   fill = false,
+  embedded = false,
 }: {
   artifact: RunCodeArtifact;
   fullscreen?: boolean;
   fill?: boolean;
+  /** Flush inside a card below its header: no own border or rounding. */
+  embedded?: boolean;
 }) {
+  const flush = embedded && 'rounded-none border-0 border-t';
   if (artifact.kind === 'file') {
     return <FileArtifactCard artifact={artifact} />;
   }
@@ -55,6 +59,7 @@ export function ArtifactPreview({
             : fill
               ? 'mx-auto max-h-full max-w-full object-contain'
               : 'w-full max-w-full',
+          flush,
         )}
         // Plain image, on the app's origin: it executes nothing, so a separate
         // origin isolates nothing while costing a DNS lookup and TLS handshake
@@ -71,7 +76,7 @@ export function ArtifactPreview({
           ? 'h-[78vh] rounded-xl'
           : fill
             ? 'h-full w-full'
-            : 'h-[24rem]'
+            : cn('h-[24rem]', flush)
       }
       filename={artifact.filename}
       title={`Chart ${artifact.ref}`}

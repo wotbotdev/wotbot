@@ -45,10 +45,11 @@ export const RunCodeArtifactCard = memo(function RunCodeArtifactCard({
       open={isFullscreenOpen}
     >
       <Collapsible open={showPreview} onOpenChange={setShowPreview}>
-        <Card className="gap-0 border border-border/55 bg-background/45 py-0 shadow-none ring-0">
-          <CardContent className="space-y-2 py-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2 px-0.5">
+        <Card className="gap-0 overflow-hidden border border-border/55 bg-background/45 py-0 shadow-none ring-0">
+          {/* The preview sits flush in the card; only the header is padded. */}
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
                 <Badge
                   className="h-5 font-mono text-[0.66rem]"
                   variant="outline"
@@ -82,7 +83,7 @@ export const RunCodeArtifactCard = memo(function RunCodeArtifactCard({
             </div>
 
             <CollapsibleContent className="data-closed:hidden">
-              <ArtifactPreview artifact={artifact} />
+              <ArtifactPreview artifact={artifact} embedded />
             </CollapsibleContent>
           </CardContent>
         </Card>

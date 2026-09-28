@@ -103,17 +103,16 @@ export const WebInterfaceArtifactView = memo(function WebInterfaceArtifactView({
       <Collapsible onOpenChange={setShowPanel} open={fill ? true : showPanel}>
         <Card
           className={cn(
-            'gap-0 border border-border/55 bg-background/45 py-0 shadow-none ring-0',
+            'gap-0 overflow-hidden border border-border/55 bg-background/45 py-0 shadow-none ring-0',
             fill && 'h-full w-full',
           )}
         >
-          <CardContent
-            className={cn('space-y-2 py-2', fill && 'flex h-full flex-col')}
-          >
+          {/* The frame sits flush in the card; only the header is padded. */}
+          <CardContent className={cn('p-0', fill && 'flex h-full flex-col')}>
             {/* Same identity line as a plot artifact: a ref badge and what the
               thing is, so the two kinds of generated output read alike. */}
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2 px-0.5">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
                 <Badge
                   className="h-5 font-mono text-[0.66rem]"
                   variant="outline"
@@ -171,7 +170,7 @@ export const WebInterfaceArtifactView = memo(function WebInterfaceArtifactView({
             {fill ? (
               <PanelFrame
                 capabilities={artifact.capabilities}
-                className="min-h-0 flex-1"
+                className="min-h-0 flex-1 rounded-none border-0 border-t"
                 src={src}
                 title={`Interface ${artifact.ref}`}
               />
@@ -179,6 +178,7 @@ export const WebInterfaceArtifactView = memo(function WebInterfaceArtifactView({
               <CollapsibleContent>
                 <PanelFrame
                   capabilities={artifact.capabilities}
+                  className="h-[26rem] rounded-none border-0 border-t"
                   src={src}
                   title={`Interface ${artifact.ref}`}
                 />
