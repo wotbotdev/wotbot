@@ -2,7 +2,6 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -44,8 +43,8 @@ function useThoughtGroupReport(): ThoughtGroupReport | null {
  *
  * Deregistering on unmount matters: messages render by index, so regenerating a
  * response or switching branches reuses this block instance. Without the
- * cleanup it would keep the previous run's count and stay auto-expanded over a
- * failure that is no longer on screen.
+ * cleanup it would keep the previous run's count and failure marker for parts
+ * that are no longer on screen.
  */
 export function useReportToolCall(toolCallId: string, hasError: boolean) {
   const report = useThoughtGroupReport();
@@ -89,8 +88,7 @@ function toggleId(
 }
 
 export function ThoughtGroup({ children }: { children: ReactNode }) {
-  const [isManuallyExpanded, setIsManuallyExpanded] = useState(false);
-  const [shouldAutoExpandError, setShouldAutoExpandError] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [errorIds, setErrorIds] = useState<ReadonlySet<string>>(new Set());
   const [toolIds, setToolIds] = useState<ReadonlySet<string>>(new Set());
 
@@ -105,16 +103,9 @@ export function ThoughtGroup({ children }: { children: ReactNode }) {
   );
   const hasError = errorIds.size > 0;
 
-  // A failure opens the block as soon as it arrives. Once the user explicitly
-  // collapses it, keep respecting that choice instead of forcing it back open.
-  const isExpanded = isManuallyExpanded || (hasError && shouldAutoExpandError);
-  const handleExpandedChange = useCallback((open: boolean) => {
-    setIsManuallyExpanded(open);
-    if (!open) {
-      setShouldAutoExpandError(false);
-    }
-  }, []);
-
+  // Failures stay collapsed: the header's icon and "N failed" count flag them,
+  // and the agent usually recovers on its own, so opening would only push the
+  // answer out of view.
   const detail = formatDetail(toolIds.size, errorIds.size);
 
   return (
@@ -122,7 +113,7 @@ export function ThoughtGroup({ children }: { children: ReactNode }) {
       <Collapsible
         className="wotbot-tool-call my-1 space-y-2"
         open={isExpanded}
-        onOpenChange={handleExpandedChange}
+        onOpenChange={setIsExpanded}
       >
         {/* Same header shape as the tool and device-interaction cards, so the
             chat reads as one family of blocks rather than three. */}

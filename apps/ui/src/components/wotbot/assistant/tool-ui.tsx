@@ -65,7 +65,7 @@ function toRenderProps(
 /**
  * A tool call inside the thought block: the compact card only.
  *
- * It also reports itself upward so the block can title itself and open on a
+ * It also reports itself upward so the block can count its tools and flag a
  * failure, which it cannot work out from its own children.
  */
 export function GroupedToolCall(props: ToolCallMessagePartProps) {
