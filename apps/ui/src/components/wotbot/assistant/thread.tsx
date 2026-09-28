@@ -45,6 +45,7 @@ import {
   StandaloneToolCall,
 } from '@/components/wotbot/assistant/tool-ui';
 import { ThinkingIndicator } from '@/components/elements/thinking-indicator';
+import { pendingToolName } from '@/components/wotbot/assistant/activity';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Button } from '@/components/ui/button';
@@ -142,18 +143,24 @@ function AssistantParts() {
           case 'text':
             return <MarkdownText />;
           case 'indicator':
-            return (
-              <ThinkingIndicator
-                aria-live="polite"
-                label="Thinking"
-                role="status"
-              />
-            );
+            return <ActivityIndicator />;
           default:
             return null;
         }
       }}
     </MessagePrimitive.GroupedParts>
+  );
+}
+
+/** The turn's single activity signal, naming the tool call it is waiting on. */
+function ActivityIndicator() {
+  const toolName = useAuiState(pendingToolName);
+  return (
+    <ThinkingIndicator
+      aria-live="polite"
+      label={toolName ? `Thinking · ${toolName}` : 'Thinking'}
+      role="status"
+    />
   );
 }
 
