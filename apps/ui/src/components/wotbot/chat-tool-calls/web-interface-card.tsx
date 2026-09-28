@@ -168,12 +168,6 @@ export const WebInterfaceArtifactView = memo(function WebInterfaceArtifactView({
                 </Tooltip>
               </div>
             </div>
-            {artifact.validation ? (
-              <PanelValidationDetails
-                key={artifact.validation.reportId}
-                validation={artifact.validation}
-              />
-            ) : null}
             {fill ? (
               <PanelFrame
                 capabilities={artifact.capabilities}
@@ -313,7 +307,8 @@ export const WebInterfaceCard = memo(function WebInterfaceCard({
         </Alert>
       ) : null}
 
-      {parsed.validation && (!showInterface || !artifact) ? (
+      {/* The validation lives with the tool call, not under the preview. */}
+      {parsed.validation ? (
         <PanelValidationDetails
           key={parsed.validation.reportId}
           validation={parsed.validation}
