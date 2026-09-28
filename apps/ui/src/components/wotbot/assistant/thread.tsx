@@ -39,6 +39,7 @@ import {
   isStandalonePart,
   wotbotGroupBy,
 } from '@/components/wotbot/assistant/part-grouping';
+import { DownloadsGroup } from '@/components/wotbot/assistant/downloads-group';
 import { ThoughtGroup } from '@/components/wotbot/assistant/thought-group';
 import {
   GroupedToolCall,
@@ -124,14 +125,7 @@ function AssistantParts() {
           case GROUP_TOOL:
             return children;
           case GROUP_DOWNLOADS:
-            return (
-              <section aria-label="Downloads" className="my-1 space-y-1.5">
-                <p className="px-1 text-[0.76rem] font-medium text-foreground">
-                  Downloads
-                </p>
-                {children}
-              </section>
-            );
+            return <DownloadsGroup>{children}</DownloadsGroup>;
           case 'reasoning':
             return <ReasoningPart />;
           case 'tool-call':
