@@ -58,6 +58,21 @@ def test_three_attempts_then_stop_despite_changed_title_or_html():
     )
 
 
+@pytest.mark.parametrize("max_repairs", [0, 4])
+def test_repair_limit_is_configurable(max_repairs):
+    last = current_attempt(history(["failed"] * max_repairs), "next", max_repairs)
+    assert last.blocked is None
+    assert last.metadata(retry_allowed=True) | {"previous_reports": []} == {
+        "attempt": max_repairs + 1,
+        "max_repairs": max_repairs,
+        "repairs_remaining": 0,
+        "retry_allowed": False,
+        "previous_reports": [],
+    }
+    over = current_attempt(history(["failed"] * (max_repairs + 1)), "next", max_repairs)
+    assert over.blocked == "exhausted"
+
+
 @pytest.mark.parametrize("status", ["inconclusive", "unavailable"])
 def test_outage_stops_repairs_until_a_new_user_request(status):
     messages = history([status])

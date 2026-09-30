@@ -259,9 +259,9 @@ async def create_web_interface(
     up to 20 reads with a five-second deadline per read. Validator outages, offline
     devices and timeouts are inconclusive;
     do not repeatedly rewrite working code for an infrastructure failure.
-    Each panel gets an initial attempt and at most TWO repair attempts in this
-    user turn, across static, data and browser failures. Create panels one at a
-    time. Respect retry_allowed in the result: false means stop and explain the
+    Each panel gets an initial attempt and a limited number of repair attempts
+    (max_repairs in the result) in this user turn, across static, data and
+    browser failures. Create panels one at a time. Respect retry_allowed in the result: false means stop and explain the
     remaining problem. Inconclusive/unavailable checks stop automatic retries
     immediately. A new user request can try again. Saved reports and screenshots
     remain available to the user for 30 days; image bytes never enter this result.
@@ -281,14 +281,17 @@ async def create_web_interface(
     interface.
     """
     attempt = (
-        current_attempt(runtime.state.get("messages", []), runtime.tool_call_id)
+        current_attempt(
+            runtime.state.get("messages", []), runtime.tool_call_id, _settings.panel_max_repairs
+        )
         if runtime
-        else current_attempt([], "")
+        else current_attempt([], "", _settings.panel_max_repairs)
     )
     if attempt.blocked:
+        repairs = attempt.max_repairs
         reasons = {
             "parallel": "Create panels one at a time; wait for the current panel result before submitting another.",
-            "exhausted": "Panel repair limit reached (initial attempt plus two repairs). Stop rewriting and explain the remaining errors to the user.",
+            "exhausted": f"Panel repair limit reached (initial attempt plus {repairs} repair(s)). Stop rewriting and explain the remaining errors to the user.",
             "inconclusive": "The previous validation was inconclusive or unavailable. Stop automatic retries and explain the diagnostics; a new user request can try again.",
         }
         return {

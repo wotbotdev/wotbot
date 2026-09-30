@@ -162,7 +162,8 @@ one request, no provider retries, a 30-second deadline and a 2500-token output
 limit. Each report records model, rubric version, latency, token usage and cost
 when the provider reports it. Token counts are not billed cost.
 
-Each panel has one initial attempt and at most two repairs in a user turn.
+Each panel has one initial attempt and at most two repairs in a user turn
+(`PANEL_MAX_REPAIRS`, default 2).
 Accounting uses checkpointed tool history, so changing a title or attachment does
 not reset a failed attempt. Static and attachment failures count too. Inconclusive
 or unavailable checks stop retries immediately, and simultaneous panel calls are

@@ -308,6 +308,8 @@ class Settings(BaseSettings):
     # Advisory only. Uses the configured endpoint/key in the caller, never Chromium.
     panel_visual_review_enabled: bool = True
     panel_visual_review_model: str = ""
+    # Repairs after the initial panel attempt, per panel and user turn.
+    panel_max_repairs: int = Field(default=2, ge=0)
     code_executor_timeout_seconds: int = 330
     code_executor_retry_attempts: int = 3
     code_executor_retry_backoff_seconds: float = 1.0
