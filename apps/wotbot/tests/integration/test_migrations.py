@@ -74,7 +74,7 @@ def test_alembic_metadata_has_no_pending_schema_drift(jobs_integration_environme
 
 def test_panel_migrations_extend_the_agent_execution_schema() -> None:
     script = ScriptDirectory.from_config(_alembic_config())
-    assert script.get_heads() == ["0012_workspace_scope"]
+    assert script.get_heads() == ["0013_workspace_registry"]
     revisions = list(script.iterate_revisions("0008_agent_execution", "0007_add_thing_origin"))
     assert [revision.revision for revision in revisions] == ["0008_agent_execution"]
 

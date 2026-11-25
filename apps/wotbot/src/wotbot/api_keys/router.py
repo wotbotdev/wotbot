@@ -16,6 +16,8 @@ class CreateApiKeyRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     scopes: list[str] = Field(..., min_length=1)
     expires_at: datetime | None = None
+    # Defaults to the creating key's workspace.
+    workspace_id: str | None = None
 
 
 class ApiKeyResponse(BaseModel):
@@ -29,6 +31,7 @@ class ApiKeyResponse(BaseModel):
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
     is_active: bool
+    workspace_id: str
 
 
 class CreateApiKeyResponse(BaseModel):
@@ -48,6 +51,7 @@ def _serialize_api_key(record) -> dict[str, Any]:
         "expires_at": record.expires_at.isoformat() if record.expires_at else None,
         "last_used_at": record.last_used_at.isoformat() if record.last_used_at else None,
         "is_active": record.is_active,
+        "workspace_id": record.workspace_id,
     }
 
 
@@ -62,6 +66,7 @@ def create_key(
         name=body.name,
         scopes=body.scopes,
         expires_at=body.expires_at,
+        workspace_id=body.workspace_id,
     )
 
     return {

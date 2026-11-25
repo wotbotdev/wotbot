@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from sqlalchemy import ForeignKey, Integer, Text, create_engine, delete, func, select, update
 from sqlalchemy.orm import (
@@ -17,6 +19,10 @@ from wotbot.workspaces import (
     DEFAULT_WORKSPACE_ID,
     InvalidWorkspaceIdError,
     WorkspaceScoped,
+    all_workspaces_active,
+    all_workspaces_scope,
+    bind_all_workspaces,
+    bind_workspace,
     current_workspace_id,
     install_workspace_filter,
     workspace_filter_installed,
@@ -182,6 +188,82 @@ def test_delete_is_limited_to_the_active_workspace(factory: sessionmaker[Session
 def test_all_workspaces_option_bypasses_the_filter(factory: sessionmaker[Session]) -> None:
     with workspace_scope("alpha"):
         assert _texts(factory, **{ALL_WORKSPACES: True}) == ["a1", "a2", "b1"]
+
+
+def test_all_workspaces_scope_bypasses_the_filter_and_restores(
+    factory: sessionmaker[Session],
+) -> None:
+    with workspace_scope("alpha"):
+        with all_workspaces_scope():
+            assert all_workspaces_active()
+            assert _texts(factory) == ["a1", "a2", "b1"]
+            with workspace_scope("beta"):
+                assert not all_workspaces_active()
+                assert _texts(factory) == ["b1"]
+        assert not all_workspaces_active()
+        assert _texts(factory) == ["a1", "a2"]
+
+
+def test_bindings_stay_inside_their_task() -> None:
+    async def run_in(workspace_id: str | None) -> tuple[str, bool]:
+        if workspace_id is None:
+            bind_all_workspaces()
+        else:
+            bind_workspace(workspace_id)
+        await asyncio.sleep(0)
+        thread_view = await asyncio.to_thread(current_workspace_id)
+        assert thread_view == current_workspace_id()
+        return current_workspace_id(), all_workspaces_active()
+
+    async def main() -> list[tuple[str, bool]]:
+        results = await asyncio.gather(
+            asyncio.create_task(run_in("alpha")),
+            asyncio.create_task(run_in("beta")),
+            asyncio.create_task(run_in(None)),
+        )
+        assert (current_workspace_id(), all_workspaces_active()) == (DEFAULT_WORKSPACE_ID, False)
+        return list(results)
+
+    assert asyncio.run(main()) == [
+        ("alpha", False),
+        ("beta", False),
+        (DEFAULT_WORKSPACE_ID, True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("enabled", "auth_type", "workspace_id", "expected"),
+    [
+        ("true", "api_key", "alpha", ("alpha", False)),
+        ("true", "api_key", None, (DEFAULT_WORKSPACE_ID, False)),
+        ("true", "service", None, (DEFAULT_WORKSPACE_ID, True)),
+        ("false", "api_key", "alpha", (DEFAULT_WORKSPACE_ID, False)),
+        ("false", "service", None, (DEFAULT_WORKSPACE_ID, False)),
+    ],
+)
+def test_principal_binding_follows_key_and_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    enabled: str,
+    auth_type: str,
+    workspace_id: str | None,
+    expected: tuple[str, bool],
+) -> None:
+    from wotbot.auth.models import User
+    from wotbot.core.config import get_settings
+    from wotbot.workspaces.binding import bind_principal_workspace
+
+    monkeypatch.setenv("WORKSPACES_ENABLED", enabled)
+    get_settings.cache_clear()
+    user = User(user_id="u", auth_type=auth_type, workspace_id=workspace_id)
+
+    async def bound() -> tuple[str, bool]:
+        bind_principal_workspace(user)
+        return current_workspace_id(), all_workspaces_active()
+
+    try:
+        assert asyncio.run(bound()) == expected
+    finally:
+        get_settings.cache_clear()
 
 
 def test_tables_without_the_mixin_are_not_filtered(factory: sessionmaker[Session]) -> None:

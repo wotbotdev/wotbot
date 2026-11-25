@@ -72,6 +72,7 @@ def get_api_key_user_from_token(token: str, *, session_factory=None) -> User | N
             scopes=list(row.scopes or []),
             auth_type="api_key",
             api_key_id=str(row.id),
+            workspace_id=row.workspace_id,
         )
 
 
@@ -90,6 +91,7 @@ def get_agent_principal(owner: str, *, session_factory=None, auth_type="api_key"
             api_key_id=owner,
             auth_type=auth_type,
             scopes=["agent:invoke"],
+            workspace_id=key.workspace_id,
         )
 
 

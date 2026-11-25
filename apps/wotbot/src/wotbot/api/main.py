@@ -204,6 +204,10 @@ app.include_router(wot_runtime_router)
 app.include_router(discovery_router)
 app.include_router(panels_router)
 app.include_router(virtual_things_router)
+if get_registry_settings().workspaces_enabled:
+    from wotbot.workspaces.router import router as workspaces_router
+
+    app.include_router(workspaces_router)
 
 
 def _current_settings() -> AgentSettings | None:

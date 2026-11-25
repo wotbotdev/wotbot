@@ -2,14 +2,19 @@ from fastapi import Depends, HTTPException, status
 
 from wotbot.auth.models import User
 from wotbot.auth.providers import get_current_user
+from wotbot.workspaces.binding import bind_principal_workspace
 
 
-def require_user(current_user: User | None = Depends(get_current_user)) -> User:
+async def require_user(current_user: User | None = Depends(get_current_user)) -> User:
+    # Async on purpose: FastAPI runs it in the request task, so the workspace
+    # bound here is inherited by the endpoint and by any thread it starts.
+    # A sync dependency would run in a worker thread whose context is discarded.
     if current_user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required",
         )
+    bind_principal_workspace(current_user)
     return current_user
 
 

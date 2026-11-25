@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from wotbot.api_keys.models import ApiKey, ApiKeyRecord, ApiKeyRow
 from wotbot.core.scopes import API_KEY_SCOPES, VALID_SCOPES
 from wotbot.core.time import utc_now
+from wotbot.workspaces.context import DEFAULT_WORKSPACE_ID
 
 
 def _validate_scopes(scopes: list[str]) -> None:
@@ -38,6 +39,7 @@ def _row_from_model(row: ApiKey) -> ApiKeyRow:
         expires_at=row.expires_at,
         last_used_at=row.last_used_at,
         is_active=row.is_active,
+        workspace_id=row.workspace_id,
     )
 
 
@@ -53,6 +55,7 @@ def _to_record(row: ApiKeyRow) -> ApiKeyRecord:
         expires_at=row.expires_at,
         last_used_at=row.last_used_at,
         is_active=row.is_active,
+        workspace_id=row.workspace_id,
     )
 
 
@@ -62,6 +65,7 @@ def create_api_key(
     name: str,
     scopes: list[str],
     expires_at: datetime | None = None,
+    workspace_id: str = DEFAULT_WORKSPACE_ID,
 ) -> tuple[ApiKeyRecord, str]:
     _validate_scopes(scopes)
 
@@ -74,6 +78,7 @@ def create_api_key(
         name=name,
         scopes=list(scopes),
         user_id=user_id,
+        workspace_id=workspace_id,
         created_at=now,
         updated_at=now,
         expires_at=expires_at,

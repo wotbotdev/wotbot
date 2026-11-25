@@ -11,3 +11,5 @@ class User:
     auth_type: str = "user"
     service_id: str | None = None
     api_key_id: str | None = None
+    # The workspace an API key is bound to; None for services and anonymous use.
+    workspace_id: str | None = None

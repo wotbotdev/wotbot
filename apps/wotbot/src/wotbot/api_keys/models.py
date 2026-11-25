@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Index, Text, text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wotbot.core.orm import Base
+from wotbot.workspaces.context import DEFAULT_WORKSPACE_ID
+from wotbot.workspaces.models import Workspace  # noqa: F401  (FK target must be mapped)
 
 
 class ApiKey(Base):
@@ -23,6 +25,16 @@ class ApiKey(Base):
         server_default=text("'[]'::jsonb"),
     )
     user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    # Every request made with this key runs in this workspace. Deliberately not
+    # WorkspaceScoped: keys are looked up before any workspace is known.
+    workspace_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("workspaces.id", ondelete="RESTRICT", name="fk_api_keys_workspace_id"),
+        nullable=False,
+        default=DEFAULT_WORKSPACE_ID,
+        server_default=DEFAULT_WORKSPACE_ID,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -55,6 +67,7 @@ class ApiKeyRecord:
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
     is_active: bool = True
+    workspace_id: str = DEFAULT_WORKSPACE_ID
 
 
 @dataclass(frozen=True)
@@ -70,3 +83,4 @@ class ApiKeyRow:
     expires_at: datetime | None = None
     last_used_at: datetime | None = None
     is_active: bool = True
+    workspace_id: str = DEFAULT_WORKSPACE_ID

@@ -10,6 +10,8 @@ API_KEY_SCOPES: tuple[str, ...] = (
     "credentials:write",
     "sources:manage",
     "keys:manage",
+    # Create and delete workspaces, and issue API keys for any workspace.
+    "workspaces:manage",
 )
 
 VALID_SCOPES = frozenset(API_KEY_SCOPES)

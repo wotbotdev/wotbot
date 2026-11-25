@@ -33,6 +33,7 @@ from wotbot.core.agent_runs import (
 )
 from wotbot.core.time import utc_now
 from wotbot.threads import sync_thread_after_run
+from wotbot.workspaces.binding import bind_principal_workspace, workspaces_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,21 @@ class AgentRuntime:
             else:
                 queue.put_nowait(event)
 
+    async def _bind_owner_workspace(self, owner: str) -> None:
+        """Run this task in the workspace of the invoking API key (A2A and MCP).
+
+        ``_run`` always executes in its own task, so the binding cannot leak into
+        other runs; graph nodes and tool threads inherit it.
+        """
+        if not workspaces_enabled():
+            return
+        principal = await asyncio.to_thread(
+            get_agent_principal, owner, session_factory=self.store.session_factory
+        )
+        if principal is None:
+            raise PermissionError("The invoking API key is no longer authorized")
+        bind_principal_workspace(principal)
+
     async def _run(self, owner: str, admission: Admission, message: dict):
         task, thread_id = admission.task, admission.thread_id
         operation = admission.operation
@@ -247,6 +263,7 @@ class AgentRuntime:
             raise RuntimeError("Execution graph is unavailable")
         watcher = asyncio.create_task(self._watch_key(owner, task.id, asyncio.current_task()))
         try:
+            await self._bind_owner_workspace(owner)
             await self._status(owner, task, TaskState.TASK_STATE_WORKING)
             config = {"configurable": {"thread_id": thread_id}}
             prior = await graph.aget_state(config)

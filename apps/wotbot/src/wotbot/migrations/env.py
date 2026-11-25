@@ -32,7 +32,8 @@ def _import_models_for_metadata() -> None:
     import wotbot.panels.models
     import wotbot.search.models
     import wotbot.threads.models
-    import wotbot.virtual_things.db  # noqa: F401
+    import wotbot.virtual_things.db
+    import wotbot.workspaces.models  # noqa: F401
 
 
 _import_models_for_metadata()

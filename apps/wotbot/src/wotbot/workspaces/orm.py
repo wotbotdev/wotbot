@@ -19,7 +19,11 @@ from typing import Any
 from sqlalchemy import Text, event
 from sqlalchemy.orm import Mapped, ORMExecuteState, mapped_column, with_loader_criteria
 
-from wotbot.workspaces.context import DEFAULT_WORKSPACE_ID, current_workspace_id
+from wotbot.workspaces.context import (
+    DEFAULT_WORKSPACE_ID,
+    all_workspaces_active,
+    current_workspace_id,
+)
 
 # Execution option that lets trusted service code (for example the WoT runtime's
 # registry reads) see rows of every workspace:
@@ -46,7 +50,7 @@ def _apply_workspace_criteria(execute_state: ORMExecuteState) -> None:
         return
     if not (execute_state.is_select or execute_state.is_update or execute_state.is_delete):
         return
-    if execute_state.execution_options.get(ALL_WORKSPACES, False):
+    if execute_state.execution_options.get(ALL_WORKSPACES, False) or all_workspaces_active():
         return
 
     workspace_id = current_workspace_id()
