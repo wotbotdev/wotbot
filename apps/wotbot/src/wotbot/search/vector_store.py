@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from wotbot.core.database import get_session_factory
 from wotbot.search.models import SearchIndexChunk
+from wotbot.workspaces import current_workspace_id
 
 
 @dataclass(frozen=True)
@@ -101,10 +102,12 @@ class SearchVectorStore:
             vectors = await embeddings.aembed_documents(
                 [document.page_content for document in documents]
             )
+            workspace_id = current_workspace_id()
             rows = [
                 {
                     "chunk_id": chunk_id,
                     "thing_id": thing_id,
+                    "workspace_id": workspace_id,
                     "page_content": document.page_content,
                     "metadata_json": dict(document.metadata),
                     "embedding": self._validate_embedding(vector),
@@ -217,6 +220,8 @@ class SearchVectorStore:
                             "embedding": stmt.excluded.embedding,
                             "updated_at": func.now(),
                         },
+                        # Never overwrite a chunk indexed for another workspace.
+                        where=SearchIndexChunk.workspace_id == stmt.excluded.workspace_id,
                     )
                 )
 

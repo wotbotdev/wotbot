@@ -66,6 +66,7 @@ def to_record(thing: Thing) -> ThingRecord:
         origin_source_id=thing.origin_source_id,
         document=dict(thing.document),
         document_hash=thing.document_hash,
+        workspace_id=thing.workspace_id,
     )
 
 

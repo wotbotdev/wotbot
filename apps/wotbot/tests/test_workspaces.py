@@ -307,3 +307,91 @@ def test_session_factory_installs_filter_only_when_enabled(
         get_settings.cache_clear()
         get_session_factory.cache_clear()
         get_sqlalchemy_engine.cache_clear()
+
+
+# -- search indexing ----------------------------------------------------------
+
+
+def _lamp_td() -> dict:
+    return {
+        "@context": "https://www.w3.org/2022/wot/td/v1.1",
+        "id": "urn:test:lamp",
+        "title": "Lamp",
+        "securityDefinitions": {"nosec_sc": {"scheme": "nosec"}},
+        "security": "nosec_sc",
+    }
+
+
+def test_change_events_carry_the_workspace_without_changing_the_td_hash() -> None:
+    from wotbot.catalog.events.payloads import build_change_event
+    from wotbot.catalog.models import ThingRecord
+    from wotbot.catalog.store import hash_document
+    from wotbot.thing_indexer.summary_utils import compute_td_hash, normalize_thing_td_payload
+
+    td = _lamp_td()
+    record = ThingRecord(
+        id=td["id"],
+        title="Lamp",
+        description="",
+        tags=[],
+        origin_kind="manual",
+        origin_provider=None,
+        origin_external_id=None,
+        origin_source_id=None,
+        document=td,
+        document_hash=hash_document(td),
+        workspace_id="alpha",
+    )
+    event = build_change_event("create", record)
+
+    assert event["workspaceId"] == "alpha"
+    assert "workspaceId" not in normalize_thing_td_payload(event)
+    assert compute_td_hash(event) == record.document_hash
+
+
+def test_remove_events_carry_the_active_workspace() -> None:
+    from wotbot.catalog.events.payloads import build_remove_event
+
+    with workspace_scope("beta"):
+        assert build_remove_event("urn:test:lamp")["workspaceId"] == "beta"
+
+
+@pytest.mark.parametrize(
+    ("event_type", "workspace_id", "expected"),
+    [
+        ("create", "alpha", ("upsert", "alpha")),
+        ("update", "beta", ("upsert", "beta")),
+        ("remove", "beta", ("remove", "beta")),
+        ("create", None, ("upsert", DEFAULT_WORKSPACE_ID)),
+    ],
+)
+def test_indexer_writes_into_the_event_workspace(
+    event_type: str, workspace_id: str | None, expected: tuple[str, str]
+) -> None:
+    from types import SimpleNamespace
+
+    from wotbot.thing_indexer.service import ThingIndexerService
+
+    seen: list[tuple[str, str]] = []
+
+    async def prepare(event, *, thing_id, event_type):
+        return thing_id
+
+    async def upsert(prepared):
+        await asyncio.sleep(0)
+        seen.append(("upsert", await asyncio.to_thread(current_workspace_id)))
+
+    async def remove(thing_id):
+        seen.append(("remove", current_workspace_id()))
+
+    indexer = SimpleNamespace(
+        _prepare_index_entry=prepare, _upsert_index_entry=upsert, _remove_index_entry=remove
+    )
+    event = {**_lamp_td(), "eventType": event_type}
+    if workspace_id is not None:
+        event["workspaceId"] = workspace_id
+
+    asyncio.run(ThingIndexerService.process_event(indexer, event))
+
+    assert seen == [expected]
+    assert current_workspace_id() == DEFAULT_WORKSPACE_ID

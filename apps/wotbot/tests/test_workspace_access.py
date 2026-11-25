@@ -88,7 +88,8 @@ class WorkspaceAccessTestCase(unittest.TestCase):
         init_db()
         with get_connection_pool().connection() as connection:
             connection.execute(
-                "TRUNCATE api_keys, things, discovery_source_credentials, discovery_sources CASCADE"
+                "TRUNCATE api_keys, things, discovery_source_credentials, discovery_sources, "
+                "search_index_chunks CASCADE"
             )
             connection.execute("DELETE FROM workspaces WHERE id <> 'default'")
             connection.commit()

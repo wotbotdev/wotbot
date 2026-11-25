@@ -13,8 +13,13 @@ class ThingTDMetadata(TypedDict):
     eventNames: list[str]
 
 
+# Event envelope fields that are not part of the Thing Description. Keeping
+# them out preserves the TD hash and keeps them out of summaries and RDF.
+_EVENT_ENVELOPE_KEYS = frozenset({"eventType", "hash", "workspaceId"})
+
+
 def normalize_thing_td_payload(thing_td: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in thing_td.items() if key not in {"eventType", "hash"}}
+    return {key: value for key, value in thing_td.items() if key not in _EVENT_ENVELOPE_KEYS}
 
 
 def clean_text(value: Any) -> str:

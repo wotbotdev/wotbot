@@ -21,6 +21,7 @@ from wotbot.rdf.models import (
     RdfReindexResponse,
 )
 from wotbot.rdf.store import RdfStoreService
+from wotbot.workspaces import all_workspaces_scope
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +106,9 @@ def _rdf_store(request: Request) -> RdfStoreService:
 
 def _load_all_things() -> list[tuple[str, dict[str, Any]]]:
     session_factory = get_session_factory()
-    with session_factory() as session:
+    # The RDF store is an internal service and still holds every workspace's
+    # Things, so a reindex must not be limited to the default workspace.
+    with all_workspaces_scope(), session_factory() as session:
         things = session.scalars(select(Thing).order_by(Thing.id)).all()
         return [(record.id, record.document) for record in (to_record(thing) for thing in things)]
 

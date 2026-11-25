@@ -160,6 +160,7 @@ def test_api_things_crud_and_events(authenticated_headers):
         assert publisher.events[-1] == {
             "eventType": "remove",
             "id": thing["id"],
+            "workspaceId": "default",
         }
 
 

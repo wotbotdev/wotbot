@@ -23,6 +23,7 @@ from wotbot.thing_indexer.summary_utils import (
     extract_td_metadata,
     normalize_thing_td_payload,
 )
+from wotbot.workspaces import DEFAULT_WORKSPACE_ID, workspace_scope
 
 logger = logging.getLogger(__name__)
 
@@ -79,20 +80,23 @@ class ThingIndexerService:
             return
 
         try:
-            if event_type == "remove":
-                await self._remove_index_entry(thing_id)
-                return
+            # Index into the workspace the Thing belongs to. Events published
+            # before workspaces existed carry no workspace and stay in default.
+            with workspace_scope(str(event.get("workspaceId") or DEFAULT_WORKSPACE_ID)):
+                if event_type == "remove":
+                    await self._remove_index_entry(thing_id)
+                    return
 
-            if event_type not in {"create", "update"}:
-                logger.info("Ignoring event type '%s' for thing '%s'", event_type, thing_id)
-                return
+                if event_type not in {"create", "update"}:
+                    logger.info("Ignoring event type '%s' for thing '%s'", event_type, thing_id)
+                    return
 
-            prepared = await self._prepare_index_entry(
-                event,
-                thing_id=thing_id,
-                event_type=event_type,
-            )
-            await self._upsert_index_entry(prepared)
+                prepared = await self._prepare_index_entry(
+                    event,
+                    thing_id=thing_id,
+                    event_type=event_type,
+                )
+                await self._upsert_index_entry(prepared)
             logger.info("Successfully indexed thing: %s", thing_id)
         except Exception as exc:
             logger.error("Error managing vector for '%s': %s", thing_id, exc)

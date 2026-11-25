@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wotbot.core.orm import Base
-from wotbot.workspaces import WorkspaceScoped
+from wotbot.workspaces import DEFAULT_WORKSPACE_ID, WorkspaceScoped
 
 ThingDocument = dict[str, Any]
 
@@ -75,3 +75,4 @@ class ThingRecord:
     origin_source_id: str | None
     document: ThingDocument
     document_hash: str
+    workspace_id: str = DEFAULT_WORKSPACE_ID

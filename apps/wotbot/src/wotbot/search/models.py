@@ -9,9 +9,10 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wotbot.core.orm import Base
+from wotbot.workspaces import WorkspaceScoped
 
 
-class SearchIndexChunk(Base):
+class SearchIndexChunk(WorkspaceScoped, Base):
     __tablename__ = "search_index_chunks"
     __table_args__ = (
         Index("idx_search_index_chunks_thing_id", "thing_id"),
