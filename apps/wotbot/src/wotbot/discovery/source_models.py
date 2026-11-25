@@ -9,12 +9,16 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wotbot.core.orm import Base
+from wotbot.workspaces import WorkspaceScoped
 
 
-class DiscoverySource(Base):
+class DiscoverySource(WorkspaceScoped, Base):
     __tablename__ = "discovery_sources"
     __table_args__ = (
-        UniqueConstraint("provider", "external_id", name="uq_discovery_source_identity"),
+        # Each workspace may register the same external catalog once.
+        UniqueConstraint(
+            "workspace_id", "provider", "external_id", name="uq_discovery_source_identity"
+        ),
     )
 
     id: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -35,7 +39,7 @@ class DiscoverySource(Base):
     )
 
 
-class DiscoverySourceCredential(Base):
+class DiscoverySourceCredential(WorkspaceScoped, Base):
     __tablename__ = "discovery_source_credentials"
     __table_args__ = (UniqueConstraint("source_id", "security_name", name="uq_source_security"),)
 

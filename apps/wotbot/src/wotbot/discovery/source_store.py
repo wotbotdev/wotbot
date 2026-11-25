@@ -132,15 +132,18 @@ def set_source_credential(
         created_at=now,
         updated_at=now,
     )
-    stmt = stmt.on_conflict_do_update(
+    upsert = stmt.on_conflict_do_update(
         constraint="uq_source_security",
         set_={
             "scheme": stmt.excluded.scheme,
             "credentials": stmt.excluded.credentials,
             "updated_at": stmt.excluded.updated_at,
         },
-    )
-    session.execute(stmt)
+        # Never overwrite a credential owned by another workspace.
+        where=DiscoverySourceCredential.workspace_id == stmt.excluded.workspace_id,
+    ).returning(DiscoverySourceCredential.id)
+    if session.execute(upsert).scalar_one_or_none() is None:
+        raise ValueError("Discovery source was not found")
     session.flush()
 
 

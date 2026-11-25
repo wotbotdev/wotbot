@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import ForeignKey, Integer, Text, create_engine, delete, select, update
+from sqlalchemy import ForeignKey, Integer, Text, create_engine, delete, func, select, update
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -134,6 +134,17 @@ def test_aliased_and_joined_queries_are_filtered(factory: sessionmaker[Session])
         note_alias = aliased(_Note)
         texts = session.scalars(select(note_alias.text).order_by(note_alias.id)).all()
         assert texts == ["a1", "a2"]
+
+
+def test_counts_via_select_from_are_filtered(factory: sessionmaker[Session]) -> None:
+    with workspace_scope("alpha"), factory() as session:
+        assert session.scalar(select(func.count()).select_from(_Note)) == 2
+
+
+def test_counts_over_an_orm_subquery_are_filtered(factory: sessionmaker[Session]) -> None:
+    with workspace_scope("beta"), factory() as session:
+        subquery = select(_Note).where(_Note.text.like("%")).subquery()
+        assert session.scalar(select(func.count()).select_from(subquery)) == 1
 
 
 def test_relationship_loads_are_filtered(factory: sessionmaker[Session]) -> None:

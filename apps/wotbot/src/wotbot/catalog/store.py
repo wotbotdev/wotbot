@@ -192,12 +192,16 @@ def put_thing(session: Session, thing_id: str, document: ThingDocument) -> tuple
             "document_hash": stmt.excluded.document_hash,
             "updated_at": stmt.excluded.updated_at,
         },
+        # Thing IDs are global; never overwrite a Thing owned by another workspace.
+        where=Thing.workspace_id == stmt.excluded.workspace_id,
     ).returning(Thing, literal_column("xmax = 0").label("inserted"))
 
     row = session.execute(
         stmt,
         execution_options={"populate_existing": True},
-    ).one()
+    ).one_or_none()
+    if row is None:
+        raise ThingConflictError(f"Thing '{thing_id}' already exists in another workspace")
     thing = row[0]
     return to_record(thing), bool(row.inserted)
 

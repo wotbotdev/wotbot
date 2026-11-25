@@ -177,6 +177,9 @@ class ThingCatalogWriteService:
                 build_change_event("create" if created else "update", record),
             )
             self._session.commit()
+        except ThingConflictError as exc:
+            self._session.rollback()
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             self._session.rollback()
             raise HTTPException(status_code=400, detail=str(exc)) from exc

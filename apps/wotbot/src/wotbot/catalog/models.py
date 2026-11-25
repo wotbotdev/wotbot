@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wotbot.core.orm import Base
+from wotbot.workspaces import WorkspaceScoped
 
 ThingDocument = dict[str, Any]
 
@@ -15,7 +16,7 @@ class ThingConflictError(RuntimeError):
     """Raised when a Thing document conflicts with an existing catalog record."""
 
 
-class Thing(Base):
+class Thing(WorkspaceScoped, Base):
     __tablename__ = "things"
     __table_args__ = (
         CheckConstraint(

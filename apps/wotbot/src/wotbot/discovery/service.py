@@ -63,6 +63,7 @@ from wotbot.discovery.source_store import (
     update_source,
 )
 from wotbot.discovery.store import CandidateStore, DownloadStore, RefreshStore
+from wotbot.workspaces import DEFAULT_WORKSPACE_ID, current_workspace_id
 
 _HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 
@@ -1039,8 +1040,14 @@ _SOURCE_ID_HEX_DIGITS = 16
 
 
 def _source_id(provider: str, external_id: str) -> str:
-    identity = f"{provider}\0source\0{external_id}".encode()
-    digest = hashlib.sha256(identity).hexdigest()[:_SOURCE_ID_HEX_DIGITS]
+    identity = f"{provider}\0source\0{external_id}"
+    # Source IDs are global primary keys, and onboarded Thing IDs derive from
+    # them. Mixing in the workspace lets several workspaces register the same
+    # catalog; the default workspace keeps the original IDs.
+    workspace_id = current_workspace_id()
+    if workspace_id != DEFAULT_WORKSPACE_ID:
+        identity = f"{workspace_id}\0{identity}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:_SOURCE_ID_HEX_DIGITS]
     return f"urn:wotbot:source:{provider}:{digest}"
 
 
