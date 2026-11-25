@@ -94,6 +94,11 @@ CONFIG_SECTIONS: tuple[SectionSpec, ...] = (
         ),
     ),
     SectionSpec(
+        key="workspaces",
+        title="Workspaces",
+        fields=(FieldSpec("workspaces_enabled"),),
+    ),
+    SectionSpec(
         key="agent",
         title="Agent runtime",
         fields=(

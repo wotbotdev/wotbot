@@ -230,6 +230,11 @@ class Settings(BaseSettings):
     reasoning_effort_default: str = ""
     reasoning_effort_style: ReasoningEffortStyle = "openai"
 
+    # Workspaces (logical multi-tenancy). When enabled, ORM reads, updates and
+    # deletes on workspace-scoped tables are limited to the workspace of the
+    # current request context. Off by default: no query is rewritten.
+    workspaces_enabled: bool = False
+
     # Agent
     max_iterations: int = 20
     recursion_limit: int = 50

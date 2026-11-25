@@ -44,7 +44,12 @@ def get_sqlalchemy_engine() -> Engine:
 
 @lru_cache
 def get_session_factory() -> sessionmaker[Session]:
-    return sessionmaker(bind=get_sqlalchemy_engine(), expire_on_commit=False)
+    factory = sessionmaker(bind=get_sqlalchemy_engine(), expire_on_commit=False)
+    if get_settings().workspaces_enabled:
+        from wotbot.workspaces import install_workspace_filter
+
+        install_workspace_filter(factory)
+    return factory
 
 
 def get_connection() -> Iterator[DatabaseConnection]:
