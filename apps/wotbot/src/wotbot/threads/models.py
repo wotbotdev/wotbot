@@ -10,6 +10,7 @@ from sqlalchemy import Boolean, CheckConstraint, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from wotbot.core.orm import Base
+from wotbot.workspaces.context import DEFAULT_WORKSPACE_ID, current_workspace_id
 
 DEFAULT_THREAD_TITLE = "New Chat"
 
@@ -42,6 +43,15 @@ class Thread(Base):
     job_id: Mapped[str | None] = mapped_column(String)
     # Which API key owns this conversation. Set for external assistant and raw contexts.
     owner_api_key_id: Mapped[str | None] = mapped_column(String, index=True)
+    # Workspace the conversation was started in. Only the chat history list
+    # filters on it; agent API contexts are tied to their API key instead.
+    workspace_id: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+        default=current_workspace_id,
+        server_default=DEFAULT_WORKSPACE_ID,
+        index=True,
+    )
     # Older contexts had a separate public ID. Retain that alias without
     # renaming the thread used by checkpoints, panels and virtual Things.
     legacy_a2a_context_id: Mapped[str | None] = mapped_column(String, unique=True)

@@ -39,6 +39,7 @@ import {
   upsertCachedChat,
 } from '@/lib/chat-list-cache';
 import { Spinner } from '@/components/ui/spinner';
+import { WorkspaceSwitcher } from '@/components/workspace-switcher';
 
 type Chat = ChatSummary;
 
@@ -277,6 +278,7 @@ export function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
+        <WorkspaceSwitcher />
       </SidebarHeader>
 
       <SidebarContent>

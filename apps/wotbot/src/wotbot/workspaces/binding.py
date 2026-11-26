@@ -34,3 +34,28 @@ def bind_principal_workspace(principal: Principal) -> None:
         bind_all_workspaces()
         return
     bind_workspace(principal.workspace_id or DEFAULT_WORKSPACE_ID)
+
+
+# Request header with which a trusted caller (the web UI) picks the workspace
+# for one request, instead of the workspace its own key belongs to.
+WORKSPACE_HEADER = "X-WoTBot-Workspace"
+
+
+def may_select_workspace(principal: object) -> bool:
+    """Only workspace managers may act in a workspace other than their key's."""
+    scopes = getattr(principal, "scopes", None)
+    return scopes is None or "workspaces:manage" in scopes
+
+
+def workspace_exists(workspace_id: str) -> bool:
+    from wotbot.core.database import get_session_factory
+    from wotbot.workspaces.models import Workspace
+
+    with get_session_factory()() as session:
+        return session.get(Workspace, workspace_id) is not None
+
+
+def bind_selected_workspace(workspace_id: str) -> None:
+    """Bind a workspace a trusted caller selected for this request."""
+    if workspaces_enabled():
+        bind_workspace(workspace_id)

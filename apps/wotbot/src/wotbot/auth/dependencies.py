@@ -1,11 +1,23 @@
-from fastapi import Depends, HTTPException, status
+import asyncio
+
+from fastapi import Depends, HTTPException, Request, status
 
 from wotbot.auth.models import User
 from wotbot.auth.providers import get_current_user
-from wotbot.workspaces.binding import bind_principal_workspace
+from wotbot.workspaces.binding import (
+    WORKSPACE_HEADER,
+    bind_principal_workspace,
+    bind_selected_workspace,
+    may_select_workspace,
+    workspace_exists,
+    workspaces_enabled,
+)
+from wotbot.workspaces.context import InvalidWorkspaceIdError
 
 
-async def require_user(current_user: User | None = Depends(get_current_user)) -> User:
+async def require_user(
+    request: Request, current_user: User | None = Depends(get_current_user)
+) -> User:
     # Async on purpose: FastAPI runs it in the request task, so the workspace
     # bound here is inherited by the endpoint and by any thread it starts.
     # A sync dependency would run in a worker thread whose context is discarded.
@@ -15,7 +27,24 @@ async def require_user(current_user: User | None = Depends(get_current_user)) ->
             detail="Authentication required",
         )
     bind_principal_workspace(current_user)
+    selected = request.headers.get(WORKSPACE_HEADER, "").strip()
+    if selected and workspaces_enabled():
+        await _bind_selected(current_user, selected)
     return current_user
+
+
+async def _bind_selected(user: User, workspace_id: str) -> None:
+    if not may_select_workspace(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{WORKSPACE_HEADER} requires the workspaces:manage scope",
+        )
+    try:
+        bind_selected_workspace(workspace_id)
+    except InvalidWorkspaceIdError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not await asyncio.to_thread(workspace_exists, workspace_id):
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found")
 
 
 def require_scopes(required: list[str]):

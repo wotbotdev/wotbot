@@ -1,4 +1,5 @@
 import { backendUnavailableResponse, getWotApiUrl } from '@/lib/backend-env';
+import { workspaceHeaders } from '@/lib/workspace';
 
 export async function wotFetch(
   path: string,
@@ -13,6 +14,7 @@ export async function wotFetch(
       headers: {
         Accept: 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(await workspaceHeaders()),
         ...(init.headers instanceof Headers
           ? Object.fromEntries(init.headers.entries())
           : (init.headers ?? {})),

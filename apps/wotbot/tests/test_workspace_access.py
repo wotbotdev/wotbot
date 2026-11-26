@@ -346,3 +346,59 @@ class WorkspaceAccessTestCase(unittest.TestCase):
         self.assertEqual(action.status_code, 404, action.text)
         sent = [call.args[2]["thing_id"] for call in runtime.await_args_list]
         self.assertEqual(sent, ["urn:test:alpha-lamp"])
+
+    # -- workspace selection by the web UI ------------------------------------
+
+    def _things_with_header(self, client, headers, workspace_id):
+        return client.get("/api/things", headers={**headers, "X-WoTBot-Workspace": workspace_id})
+
+    def test_workspace_managers_can_pick_the_workspace_per_request(self) -> None:
+        for workspace_id in ("alpha", "beta"):
+            with workspace_scope(workspace_id), self.sessions() as session:
+                create_thing(session, _td(f"urn:test:{workspace_id}-lamp"))
+                session.commit()
+        client = self._client()
+        manager = self._bearer(self._key("default", ["things:read", "workspaces:manage"]))
+
+        beta = self._things_with_header(client, manager, "beta")
+        self.assertEqual(beta.status_code, 200, beta.text)
+        self.assertEqual([item["id"] for item in beta.json()["items"]], ["urn:test:beta-lamp"])
+        self.assertEqual(self._thing_ids(client, manager), [])
+
+    def test_picking_a_workspace_is_refused_without_the_manage_scope(self) -> None:
+        client = self._client()
+        alpha = self._bearer(self._key("alpha", ["things:read"]))
+        manager = self._bearer(self._key("default", ["things:read", "workspaces:manage"]))
+
+        self.assertEqual(self._things_with_header(client, alpha, "beta").status_code, 403)
+        self.assertEqual(self._things_with_header(client, manager, "gamma").status_code, 404)
+        self.assertEqual(self._things_with_header(client, manager, "Not Valid").status_code, 422)
+
+    def test_ui_chat_threads_live_in_the_selected_workspace(self) -> None:
+        from wotbot.core.api_dependencies import verify_internal_api_key_in_workspace
+        from wotbot.threads.routes import create_threads_router
+
+        app = FastAPI()
+        app.include_router(
+            create_threads_router(
+                get_checkpointer=lambda: None,
+                verify_internal_api_key=verify_internal_api_key_in_workspace,
+                get_graph=lambda: None,
+                get_settings=lambda: None,
+            )
+        )
+        client = TestClient(app)
+
+        def thread_ids(workspace_id: str | None) -> list[str]:
+            headers = {"X-WoTBot-Workspace": workspace_id} if workspace_id else {}
+            response = client.get("/threads", headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            return [thread["id"] for thread in response.json()]
+
+        created = client.post("/threads", headers={"X-WoTBot-Workspace": "alpha"}, json={})
+        self.assertEqual(created.status_code, 200, created.text)
+        thread_id = created.json()["id"]
+
+        self.assertIn(thread_id, thread_ids("alpha"))
+        self.assertNotIn(thread_id, thread_ids("beta"))
+        self.assertNotIn(thread_id, thread_ids(None))

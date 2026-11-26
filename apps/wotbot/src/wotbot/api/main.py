@@ -18,7 +18,10 @@ from wotbot.api.wot_runtime import router as wot_runtime_router
 from wotbot.api_keys.router import router as api_keys_router
 from wotbot.auth.router import router as me_router
 from wotbot.catalog.router import router as things_router
-from wotbot.core.api_dependencies import verify_internal_api_key
+from wotbot.core.api_dependencies import (
+    verify_internal_api_key,
+    verify_internal_api_key_in_workspace,
+)
 from wotbot.core.config import get_settings as get_registry_settings
 from wotbot.core.config_router import router as config_router
 from wotbot.core.database import get_connection_pool, init_db, psycopg_conninfo
@@ -241,7 +244,7 @@ app.state.run_registry = run_registry
 app.include_router(
     create_threads_router(
         get_checkpointer=_current_checkpointer,
-        verify_internal_api_key=verify_internal_api_key,
+        verify_internal_api_key=verify_internal_api_key_in_workspace,
         get_graph=_current_graph,
         get_settings=_current_settings,
         run_registry=run_registry,

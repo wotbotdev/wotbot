@@ -1,4 +1,5 @@
 import { backendUnavailableResponse, getJobRunnerUrl } from '@/lib/backend-env';
+import { workspaceHeaders } from '@/lib/workspace';
 
 export async function jobRunnerFetch(
   path: string,
@@ -15,6 +16,7 @@ export async function jobRunnerFetch(
         ...(internalApiKey
           ? { Authorization: `Bearer ${internalApiKey}` }
           : {}),
+        ...(await workspaceHeaders()),
         ...(init.headers instanceof Headers
           ? Object.fromEntries(init.headers.entries())
           : (init.headers ?? {})),

@@ -12,6 +12,8 @@ from wotbot.core.database import get_session_factory
 from wotbot.core.time import utc_now
 from wotbot.threads.models import DEFAULT_THREAD_TITLE, Thread, ThreadKind, ThreadRecord
 from wotbot.threads.titles import MAX_THREAD_TITLE_LENGTH
+from wotbot.workspaces.binding import workspaces_enabled
+from wotbot.workspaces.context import all_workspaces_active, current_workspace_id
 
 
 def _now_iso() -> str:
@@ -55,6 +57,8 @@ class ThreadStore:
                 Thread.kind == ThreadKind.CHAT.value,
                 Thread.visible.is_(True),
             )
+        if workspaces_enabled() and not all_workspaces_active():
+            statement = statement.where(Thread.workspace_id == current_workspace_id())
         with self._session_factory() as session:
             threads = session.scalars(statement).all()
 

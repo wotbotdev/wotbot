@@ -1,11 +1,15 @@
 import { backendUnavailableResponse, getWotbotUrl } from '@/lib/backend-env';
+import { workspaceHeaders } from '@/lib/workspace';
 
 const internalApiKey = process.env.INTERNAL_API_KEY || '';
 
-function buildHeaders(headers?: HeadersInit) {
+async function buildHeaders(headers?: HeadersInit) {
   const merged = new Headers(headers);
   if (internalApiKey) {
     merged.set('Authorization', `Bearer ${internalApiKey}`);
+  }
+  for (const [name, value] of Object.entries(await workspaceHeaders())) {
+    merged.set(name, value);
   }
   return merged;
 }
@@ -17,7 +21,7 @@ export async function fetchWotbot(path: string, init: RequestInit = {}) {
     return await fetch(`${wotbotUrl}${path}`, {
       ...init,
       cache: init.cache ?? 'no-store',
-      headers: buildHeaders(init.headers),
+      headers: await buildHeaders(init.headers),
     });
   } catch (error) {
     if (init.signal?.aborted) {
