@@ -220,6 +220,40 @@ class DiscoveryService:
                 "The external source is unavailable or returned an invalid response.",
             )
 
+    async def onboard_external(self, *, source_id: str, external_id: str) -> dict[str, Any]:
+        """Onboard one known resource of a registered source, without a search.
+
+        For automation that already knows the resource (for example a dataspace
+        catalog entry chosen during use-case configuration). Idempotent: an
+        already onboarded resource returns its existing Thing with created=False.
+        Raises instead of returning status payloads, like the refresh flow.
+        """
+        external_id = external_id.strip()
+        if not external_id:
+            raise ValueError("external_id is required")
+        source_record = await asyncio.to_thread(self._find_source, source_id.strip())
+        if source_record is None:
+            raise LookupError("Discovery source was not found")
+        provider = PROVIDERS.get(source_record.provider)
+        if provider is None or not provider.resolves_by_id:
+            raise NotImplementedError(
+                f"Provider '{source_record.provider}' cannot onboard resources by ID"
+            )
+        source, public_http = await asyncio.to_thread(self._source_runtime, source_record)
+        try:
+            candidate = await provider.candidate(source, external_id, public_http=public_http)
+            return await self._onboard_resource(
+                source_record=source_record, source=source, candidate=candidate
+            )
+        except SourceAuthenticationError as exc:
+            raise CredentialChallengeError(
+                status="credential_rejected",
+                source_id=source_record.id,
+                security_name=source_record.security_name,
+                scheme=source_record.security_scheme,
+                message="The external source rejected its stored credential.",
+            ) from exc
+
     async def onboard(self, *, candidate_id: str, thread_id: str) -> dict[str, Any]:
         candidate = await self._candidate_store.get(
             candidate_id,

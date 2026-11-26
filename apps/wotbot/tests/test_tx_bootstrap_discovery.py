@@ -195,3 +195,39 @@ class TxBootstrapDiscoveryTestCase(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TxBootstrapResolveByIdTestCase(unittest.IsolatedAsyncioTestCase):
+    async def test_a_catalog_entry_resolves_to_its_candidate_without_searching(self) -> None:
+        sender = AsyncMock(return_value=federated_entry())
+        provider = TxBootstrapProvider()
+
+        with patch("wotbot.discovery.providers.tx_bootstrap.source_json", new=sender):
+            candidate = await provider.candidate(tx_source(), "entry-1")
+
+        self.assertTrue(provider.resolves_by_id)
+        self.assertEqual(candidate.external_id, "entry-1")
+        self.assertEqual(candidate.title, "Road network")
+        self.assertEqual(candidate.payload["dataset_id"], "asset-1")
+        self.assertEqual(
+            sender.await_args.args[1],
+            "https://consumer.example/api/federated-catalog/v1/datasets/entry-1",
+        )
+
+    async def test_an_entry_without_a_usable_policy_is_rejected(self) -> None:
+        entry = federated_entry()
+        entry["dataset"] = {
+            key: value for key, value in dataset().items() if key != "odrl:hasPolicy"
+        }
+        sender = AsyncMock(return_value=entry)
+
+        with (
+            patch("wotbot.discovery.providers.tx_bootstrap.source_json", new=sender),
+            self.assertRaisesRegex(ValueError, "no policy"),
+        ):
+            await TxBootstrapProvider().candidate(tx_source(), "entry-1")
+
+    def test_providers_without_lookup_by_id_say_so(self) -> None:
+        from wotbot.discovery.providers import PROVIDERS
+
+        self.assertFalse(PROVIDERS["udata"].resolves_by_id)

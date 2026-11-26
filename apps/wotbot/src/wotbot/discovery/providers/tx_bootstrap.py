@@ -124,48 +124,71 @@ class TxBootstrapProvider(EdcV3Provider):
                     continue
                 entries.setdefault(entry.entry_id, entry)
 
-        candidates: list[tuple[CandidateDraft, str]] = []
-        for entry in entries.values():
-            if not self._policy(entry.dataset):
-                continue
-            title, summary = _dataset_metadata(entry.dataset, fallback=entry.dataset_id)
-            api_description = edc_api_description(entry.dataset)
-            summary_metadata = api_description.summary or {}
-            operation_terms = " ".join(
-                f"{item['method']} {item['path']} {item.get('operationId', '')} "
-                f"{item.get('title', '')} {item.get('description', '')}"
-                for item in summary_metadata.get("operations", ())
-                if isinstance(item, dict)
-            )
-            candidate = CandidateDraft(
-                provider=self.name,
-                source_id=source.id,
-                external_id=entry.entry_id,
-                kind="dataspace-api" if api_description.summary else "dataspace-asset",
-                title=title,
-                summary=summary,
-                payload={
-                    "spec_digest": api_description.fingerprint,
-                    "compiler_version": _OPENAPI_COMPILER_VERSION,
-                    "dataset_id": entry.dataset_id,
-                    "participant_bpn": entry.participant_bpn,
-                    "stale": entry.stale,
-                },
-            )
-            search_text = " ".join(
-                (
-                    entry.dataset_id,
-                    entry.participant_name,
-                    entry.participant_bpn,
-                    title,
-                    summary,
-                    str(summary_metadata.get("title") or ""),
-                    str(summary_metadata.get("description") or ""),
-                    operation_terms,
-                )
-            )
-            candidates.append((candidate, search_text))
+        candidates = [
+            built
+            for entry in entries.values()
+            if (built := self._candidate_from_entry(source, entry)) is not None
+        ]
         return rank_candidates(intent, candidates, limit=limit, require_match=True)
+
+    async def candidate(
+        self,
+        source: SourceDefinition,
+        external_id: str,
+        *,
+        public_http: BoundedHttpClient | None = None,
+    ) -> CandidateDraft:
+        entry = await self._entry(source, external_id, public_http=public_http)
+        built = self._candidate_from_entry(source, entry)
+        if built is None:
+            raise ValueError(
+                f"Catalog entry '{external_id}' offers no policy this participant can negotiate"
+            )
+        return built[0]
+
+    def _candidate_from_entry(
+        self, source: SourceDefinition, entry: TxBootstrapEntry
+    ) -> tuple[CandidateDraft, str] | None:
+        """Build the candidate for one catalog entry, with the text it is ranked by."""
+        if not self._policy(entry.dataset):
+            return None
+        title, summary = _dataset_metadata(entry.dataset, fallback=entry.dataset_id)
+        api_description = edc_api_description(entry.dataset)
+        summary_metadata = api_description.summary or {}
+        operation_terms = " ".join(
+            f"{item['method']} {item['path']} {item.get('operationId', '')} "
+            f"{item.get('title', '')} {item.get('description', '')}"
+            for item in summary_metadata.get("operations", ())
+            if isinstance(item, dict)
+        )
+        candidate = CandidateDraft(
+            provider=self.name,
+            source_id=source.id,
+            external_id=entry.entry_id,
+            kind="dataspace-api" if api_description.summary else "dataspace-asset",
+            title=title,
+            summary=summary,
+            payload={
+                "spec_digest": api_description.fingerprint,
+                "compiler_version": _OPENAPI_COMPILER_VERSION,
+                "dataset_id": entry.dataset_id,
+                "participant_bpn": entry.participant_bpn,
+                "stale": entry.stale,
+            },
+        )
+        search_text = " ".join(
+            (
+                entry.dataset_id,
+                entry.participant_name,
+                entry.participant_bpn,
+                title,
+                summary,
+                str(summary_metadata.get("title") or ""),
+                str(summary_metadata.get("description") or ""),
+                operation_terms,
+            )
+        )
+        return candidate, search_text
 
     async def _selected_dataset(
         self,

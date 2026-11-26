@@ -67,6 +67,10 @@ class UrlSourceRegistrationBody(BaseModel):
     network_access: str = "public"
 
 
+class OnboardResourceBody(BaseModel):
+    external_id: str = Field(..., min_length=1, max_length=2000)
+
+
 class SetSourceCredentialBody(BaseModel):
     scheme: str
     credentials: dict[str, Any]
@@ -249,6 +253,36 @@ def remove_discovery_source_credential(
         )
         session.commit()
     return {"status": "deleted"}
+
+
+@router.post("/sources/{source_id}/onboard")
+async def onboard_source_resource(
+    source_id: str,
+    body: OnboardResourceBody,
+    request: Request,
+    _user: User = Depends(require_scopes(["sources:manage", "things:write"])),
+) -> dict[str, Any]:
+    """Onboard one resource by its external ID, e.g. a dataspace catalog entry.
+
+    Deterministic counterpart to discover_external + onboard_candidate for
+    automation. Idempotent: an existing Thing is returned with created=false.
+    """
+    try:
+        return await DiscoveryService(_settings(request)).onboard_external(
+            source_id=source_id, external_id=body.external_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CredentialChallengeError as exc:
+        raise HTTPException(status_code=428, detail=exc.public()) from exc
+    except SourceConfigurationError as exc:
+        raise HTTPException(status_code=409, detail=_MISCONFIGURED_DETAIL) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/things/{thing_id:path}/refresh/preview")

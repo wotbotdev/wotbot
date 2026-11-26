@@ -68,6 +68,24 @@ class DiscoveryProvider(ABC):
         runtime: OnboardingRuntime,
     ) -> OnboardingResult: ...
 
+    async def candidate(
+        self,
+        source: SourceDefinition,
+        external_id: str,
+        *,
+        public_http: BoundedHttpClient | None = None,
+    ) -> CandidateDraft:
+        """Resolve one resource by its external ID, without searching.
+
+        Lets automation onboard a known resource deterministically. Providers
+        that cannot look up a single resource keep this default.
+        """
+        raise NotImplementedError(f"Provider '{self.name}' cannot resolve resources by ID")
+
+    @property
+    def resolves_by_id(self) -> bool:
+        return type(self).candidate is not DiscoveryProvider.candidate
+
     def suggest_sources(self, candidate: CandidateDraft) -> tuple[dict[str, str], ...]:
         """Return related source URLs from staged metadata without probing or onboarding."""
 
