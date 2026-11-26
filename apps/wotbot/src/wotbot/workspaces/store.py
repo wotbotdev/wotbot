@@ -30,6 +30,7 @@ def to_record(row: Workspace) -> WorkspaceRecord:
         description=row.description,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        prompt_extra=row.prompt_extra,
     )
 
 
@@ -49,12 +50,14 @@ def create_workspace(
     workspace_id: str,
     title: str,
     description: str = "",
+    prompt_extra: str = "",
 ) -> WorkspaceRecord:
     now = utc_now()
     row = Workspace(
         id=validate_workspace_id(workspace_id),
         title=title,
         description=description,
+        prompt_extra=prompt_extra,
         created_at=now,
         updated_at=now,
     )
@@ -63,6 +66,29 @@ def create_workspace(
         session.flush()
     except IntegrityError as exc:
         raise WorkspaceConflictError(f"Workspace '{workspace_id}' already exists") from exc
+    return to_record(row)
+
+
+def update_workspace(
+    session: Session,
+    workspace_id: str,
+    *,
+    title: str | None = None,
+    description: str | None = None,
+    prompt_extra: str | None = None,
+) -> WorkspaceRecord | None:
+    """Change the given fields; returns None when the workspace does not exist."""
+    row = session.get(Workspace, workspace_id)
+    if row is None:
+        return None
+    if title is not None:
+        row.title = title
+    if description is not None:
+        row.description = description
+    if prompt_extra is not None:
+        row.prompt_extra = prompt_extra
+    row.updated_at = utc_now()
+    session.flush()
     return to_record(row)
 
 

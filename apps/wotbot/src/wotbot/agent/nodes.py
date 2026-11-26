@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Sequence
@@ -40,6 +41,8 @@ from wotbot.core.reasoning_effort import reasoning_effort_kwargs
 from wotbot.core.settings import ReasoningEffortSettings, ReasoningEffortStyle
 from wotbot.core.time import utc_now
 from wotbot.jobs.enums import JobOutputKind
+from wotbot.workspaces.binding import workspaces_enabled
+from wotbot.workspaces.prompting import workspace_guidance
 
 logger = logging.getLogger(__name__)
 
@@ -389,12 +392,27 @@ def _thread_id_from_config(config: RunnableConfig | None) -> str | None:
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
+async def _with_workspace_guidance(messages: list[BaseMessage]) -> list[BaseMessage]:
+    # A separate system message right after the static node prompt: the node
+    # prompt stays byte-identical across workspaces, so provider prompt-prefix
+    # caching keeps working.
+    if not workspaces_enabled():
+        return messages
+    guidance = await asyncio.to_thread(workspace_guidance)
+    if not guidance or not messages:
+        return messages
+    return [messages[0], SystemMessage(content=guidance), *messages[1:]]
+
+
 async def _with_camera_context(
     messages: list[BaseMessage],
     *,
     config: RunnableConfig | None,
     camera_frames_enabled: bool,
 ) -> list[BaseMessage]:
+    # Every user-facing branch builds its per-call context here, so this is
+    # also where the active workspace's use-case guidance is added.
+    messages = await _with_workspace_guidance(messages)
     if config and (
         config.get("configurable", {}).get("external_agent")
         or config.get("configurable", {}).get("a2a")
@@ -808,7 +826,8 @@ def make_background_job_node(
             branch_name="background_job",
             reasoning_effort=None,
         )
-        response = await runnable.ainvoke([system_message, *trimmed])
+        messages = await _with_workspace_guidance([system_message, *trimmed])
+        response = await runnable.ainvoke(messages)
         return {"messages": [response]}
 
     return node

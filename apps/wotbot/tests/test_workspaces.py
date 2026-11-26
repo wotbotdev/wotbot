@@ -395,3 +395,99 @@ def test_indexer_writes_into_the_event_workspace(
 
     assert seen == [expected]
     assert current_workspace_id() == DEFAULT_WORKSPACE_ID
+
+
+# -- use-case guidance ----------------------------------------------------------
+
+_GUIDANCE = "## Use-case guidance: Energie\nNenne Verbräuche in kWh."
+
+
+@pytest.fixture
+def guidance_enabled(monkeypatch: pytest.MonkeyPatch):
+    from wotbot.core.config import get_settings
+    from wotbot.workspaces import prompting
+
+    monkeypatch.setenv("WORKSPACES_ENABLED", "true")
+    get_settings.cache_clear()
+    prompting.invalidate_workspace_guidance()
+    yield prompting
+    prompting.invalidate_workspace_guidance()
+    get_settings.cache_clear()
+
+
+def test_guidance_is_cached_until_invalidated(guidance_enabled, monkeypatch) -> None:
+    loads: list[str] = []
+
+    def load(workspace_id: str) -> tuple[str, str]:
+        loads.append(workspace_id)
+        return "Energie", "  Nenne Verbräuche in kWh.  "
+
+    monkeypatch.setattr(guidance_enabled, "_load", load)
+    with workspace_scope("energie"):
+        first = guidance_enabled.workspace_guidance()
+        second = guidance_enabled.workspace_guidance()
+        guidance_enabled.invalidate_workspace_guidance("energie")
+        guidance_enabled.workspace_guidance()
+
+    assert first == second == _GUIDANCE
+    assert loads == ["energie", "energie"]
+
+
+def test_blank_guidance_adds_nothing(guidance_enabled, monkeypatch) -> None:
+    monkeypatch.setattr(guidance_enabled, "_load", lambda workspace_id: ("Energie", "   "))
+    with workspace_scope("energie"):
+        assert guidance_enabled.workspace_guidance() == ""
+
+
+def test_disabled_workspaces_never_load_guidance(monkeypatch) -> None:
+    from wotbot.core.config import get_settings
+    from wotbot.workspaces import prompting
+
+    monkeypatch.setenv("WORKSPACES_ENABLED", "false")
+    get_settings.cache_clear()
+    monkeypatch.setattr(prompting, "_load", lambda workspace_id: pytest.fail("loaded"))
+    try:
+        assert prompting.workspace_guidance() == ""
+    finally:
+        get_settings.cache_clear()
+
+
+class _RecordingLLM:
+    def __init__(self) -> None:
+        self.calls: list[list] = []
+
+    def bind_tools(self, tools, **kwargs):
+        return self
+
+    def bind(self, **kwargs):
+        return self
+
+    async def ainvoke(self, messages):
+        from langchain_core.messages import AIMessage
+
+        self.calls.append(list(messages))
+        return AIMessage(content="ok")
+
+
+@pytest.mark.parametrize("guidance", [_GUIDANCE, ""])
+def test_agent_nodes_add_guidance_right_after_the_static_prompt(
+    guidance_enabled, monkeypatch, guidance: str
+) -> None:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from wotbot.agent import nodes
+
+    monkeypatch.setattr(nodes, "workspace_guidance", lambda: guidance)
+    llm = _RecordingLLM()
+    node = nodes._make_llm_node(llm, tools=[], system_text="static", max_tokens=4000)
+
+    asyncio.run(node({"messages": [HumanMessage(content="Wie hoch ist der Verbrauch?")]}, None))
+
+    sent = llm.calls[0]
+    assert sent[0].content == "static"
+    if guidance:
+        assert isinstance(sent[1], SystemMessage)
+        assert sent[1].content == guidance
+        assert sent[2].content == "Wie hoch ist der Verbrauch?"
+    else:
+        assert [message.content for message in sent] == ["static", "Wie hoch ist der Verbrauch?"]

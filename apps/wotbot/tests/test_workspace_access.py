@@ -272,3 +272,37 @@ class WorkspaceAccessTestCase(unittest.TestCase):
         self.assertEqual(asyncio.run(run(owner)), "beta")
         with self.assertRaises(PermissionError):
             asyncio.run(run("revoked-or-unknown-key"))
+
+    # -- use-case guidance ---------------------------------------------------
+
+    def test_workspace_guidance_is_managed_through_the_api(self) -> None:
+        from wotbot.workspaces.prompting import invalidate_workspace_guidance, workspace_guidance
+
+        invalidate_workspace_guidance()
+        client = self._client()
+        manager = self._bearer(self._key("default", ["workspaces:manage"]))
+
+        created = client.post(
+            "/api/workspaces",
+            headers=manager,
+            json={"id": "energie", "title": "Energie", "prompt_extra": "Nenne Werte in kWh."},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        self.assertEqual(created.json()["prompt_extra"], "Nenne Werte in kWh.")
+        with workspace_scope("energie"):
+            self.assertEqual(
+                workspace_guidance(), "## Use-case guidance: Energie\nNenne Werte in kWh."
+            )
+
+        changed = client.patch(
+            "/api/workspaces/energie", headers=manager, json={"prompt_extra": "Nenne Werte in MWh."}
+        )
+        self.assertEqual(changed.status_code, 200, changed.text)
+        self.assertEqual(changed.json()["title"], "Energie")
+        with workspace_scope("energie"):
+            self.assertIn("MWh", workspace_guidance())
+        with workspace_scope("alpha"):
+            self.assertEqual(workspace_guidance(), "")
+
+        missing = client.patch("/api/workspaces/gamma", headers=manager, json={"title": "Gamma"})
+        self.assertEqual(missing.status_code, 404)

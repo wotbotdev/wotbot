@@ -19,6 +19,10 @@ class Workspace(Base):
     description: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=text("''")
     )
+    # Use-case guidance added to every user-facing agent prompt in this workspace.
+    prompt_extra: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=text("''")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -34,3 +38,4 @@ class WorkspaceRecord:
     description: str
     created_at: datetime
     updated_at: datetime
+    prompt_extra: str = ""
