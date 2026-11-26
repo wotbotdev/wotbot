@@ -168,6 +168,7 @@ async def query_rdf(request: Request, payload: RdfQueryRequest) -> dict[str, Any
             query=payload.query,
             limit=payload.limit,
             use_default_graph_as_union=payload.use_default_graph_as_union,
+            thing_ids=payload.thing_ids,
         )
     except Exception as exc:
         detail = _query_error_detail(exc)

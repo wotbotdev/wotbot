@@ -136,6 +136,7 @@ class RdfStoreService:
         query: str,
         limit: int,
         use_default_graph_as_union: bool = True,
+        thing_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         async with self._lock:
             return await asyncio.to_thread(
@@ -143,6 +144,7 @@ class RdfStoreService:
                 query,
                 limit,
                 use_default_graph_as_union,
+                thing_ids,
             )
 
     def _upsert_thing_sync(self, thing_id: str, thing_td: dict[str, Any]) -> None:
@@ -209,14 +211,18 @@ class RdfStoreService:
         query: str,
         limit: int,
         use_default_graph_as_union: bool,
+        thing_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         kind = sparql_query_kind(query)
         if contains_service_clause(query):
             raise ValueError("SPARQL SERVICE is not supported on the local RDF query endpoint")
-        result = self._store.query(
-            query,
-            use_default_graph_as_union=use_default_graph_as_union,
-        )
+        if thing_ids is None:
+            result = self._store.query(
+                query,
+                use_default_graph_as_union=use_default_graph_as_union,
+            )
+        else:
+            result = self._store.query(query, **_restricted_dataset(thing_ids))
 
         if kind == "SELECT":
             return _select_query_result(result, query=query, limit=limit)
@@ -225,6 +231,22 @@ class RdfStoreService:
             return _ask_query_result(result, query=query, limit=limit)
 
         return _graph_query_result(result, query=query, kind=kind, limit=limit)
+
+
+# Named graph that never holds data. An explicit empty dataset is clearer than
+# relying on how an empty graph list is interpreted.
+_NO_THING_GRAPH = NamedNode("urn:wotbot:rdf:no-visible-things")
+
+
+def _restricted_dataset(thing_ids: list[str]) -> dict[str, Any]:
+    """Limit a query to the named graphs of ``thing_ids`` (one graph per Thing).
+
+    The dataset passed here overrides FROM / FROM NAMED clauses in the query,
+    and GRAPH clauses can only reach the listed graphs, so other Things stay
+    invisible however the query is written.
+    """
+    graphs = [NamedNode(thing_graph_iri(thing_id)) for thing_id in thing_ids] or [_NO_THING_GRAPH]
+    return {"default_graph": graphs, "named_graphs": graphs}
 
 
 def _select_query_result(result: Any, *, query: str, limit: int) -> dict[str, Any]:

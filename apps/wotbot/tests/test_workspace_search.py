@@ -185,3 +185,42 @@ class WorkspaceSearchTestCase(unittest.TestCase):
                 [(row.chunk_id, row.workspace_id) for row in rows],
                 [("c1", "alpha"), ("c2", "default")],
             )
+
+    def _create_things(self, *workspace_ids: str) -> None:
+        for workspace_id in workspace_ids:
+            with workspace_scope(workspace_id), self.sessions() as session:
+                create_thing(session, _td(f"urn:test:{workspace_id}-lamp"))
+                session.commit()
+
+    def test_sparql_requests_name_only_the_active_workspace_things(self) -> None:
+        from wotbot.clients.rdf_service import RdfServiceClient
+        from wotbot.workspaces import all_workspaces_scope
+        from wotbot.workspaces.visibility import visible_thing_ids
+
+        self._create_things("default", "alpha", "beta")
+        with workspace_scope("alpha"):
+            self.assertEqual(visible_thing_ids(), ["urn:test:alpha-lamp"])
+        with workspace_scope("gamma"):
+            self.assertEqual(visible_thing_ids(), [])
+        with all_workspaces_scope():
+            self.assertIsNone(visible_thing_ids())
+
+        client = RdfServiceClient(get_settings())
+        sent: list[dict] = []
+
+        async def capture(method, path, payload=None):
+            sent.append(payload)
+            return {"type": "select", "rows": []}
+
+        client._request = capture  # type: ignore[method-assign]
+        self._in("beta", lambda: client.query(query="SELECT * WHERE { ?s ?p ?o }", limit=5))
+        self.assertEqual(sent[0]["thing_ids"], ["urn:test:beta-lamp"])
+
+    def test_sparql_stays_unrestricted_while_workspaces_are_disabled(self) -> None:
+        from wotbot.workspaces.visibility import visible_thing_ids
+
+        self._create_things("alpha")
+        os.environ["WORKSPACES_ENABLED"] = "false"
+        get_settings.cache_clear()
+        with workspace_scope("alpha"):
+            self.assertIsNone(visible_thing_ids())

@@ -9,6 +9,9 @@ class RdfQueryRequest(BaseModel):
     query: str = Field(min_length=1)
     limit: int = Field(default=50, ge=1, le=500)
     use_default_graph_as_union: bool = True
+    # When set, only these Things' graphs are visible (their union is the
+    # default graph). WoTBot sends the Things of the caller's workspace.
+    thing_ids: list[str] | None = None
 
 
 class RdfQueryResponse(BaseModel):

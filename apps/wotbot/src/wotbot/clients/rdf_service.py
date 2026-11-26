@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -7,6 +8,7 @@ import aiohttp
 
 from wotbot.clients._base import setting_value as _setting_value
 from wotbot.core.config import Settings
+from wotbot.workspaces.visibility import visible_thing_ids
 
 
 class RdfServiceError(ValueError):
@@ -94,15 +96,16 @@ class RdfServiceClient:
         limit: int,
         use_default_graph_as_union: bool = True,
     ) -> dict[str, Any]:
-        return await self._request(
-            "POST",
-            "/rdf/query",
-            {
-                "query": query,
-                "limit": limit,
-                "use_default_graph_as_union": use_default_graph_as_union,
-            },
-        )
+        payload: dict[str, Any] = {
+            "query": query,
+            "limit": limit,
+            "use_default_graph_as_union": use_default_graph_as_union,
+        }
+        # With workspaces enabled the RDF service only sees this workspace's Things.
+        thing_ids = await asyncio.to_thread(visible_thing_ids)
+        if thing_ids is not None:
+            payload["thing_ids"] = thing_ids
+        return await self._request("POST", "/rdf/query", payload)
 
     async def _request(
         self,
