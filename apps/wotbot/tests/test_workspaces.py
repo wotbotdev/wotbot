@@ -469,25 +469,50 @@ class _RecordingLLM:
         return AIMessage(content="ok")
 
 
-@pytest.mark.parametrize("guidance", [_GUIDANCE, ""])
-def test_agent_nodes_add_guidance_right_after_the_static_prompt(
-    guidance_enabled, monkeypatch, guidance: str
-) -> None:
-    from langchain_core.messages import HumanMessage, SystemMessage
+def _send_through_node(monkeypatch, guidance: str, config=None) -> list:
+    from langchain_core.messages import HumanMessage
 
     from wotbot.agent import nodes
 
     monkeypatch.setattr(nodes, "workspace_guidance", lambda: guidance)
     llm = _RecordingLLM()
     node = nodes._make_llm_node(llm, tools=[], system_text="static", max_tokens=4000)
+    asyncio.run(node({"messages": [HumanMessage(content="Wie hoch ist der Verbrauch?")]}, config))
+    return llm.calls[0]
 
-    asyncio.run(node({"messages": [HumanMessage(content="Wie hoch ist der Verbrauch?")]}, None))
 
-    sent = llm.calls[0]
-    assert sent[0].content == "static"
-    if guidance:
-        assert isinstance(sent[1], SystemMessage)
-        assert sent[1].content == guidance
-        assert sent[2].content == "Wie hoch ist der Verbrauch?"
-    else:
-        assert [message.content for message in sent] == ["static", "Wie hoch ist der Verbrauch?"]
+@pytest.mark.parametrize("guidance", [_GUIDANCE, ""])
+def test_agent_nodes_append_guidance_to_the_static_prompt(
+    guidance_enabled, monkeypatch, guidance: str
+) -> None:
+    sent = _send_through_node(monkeypatch, guidance)
+
+    expected_system = f"static\n\n{guidance}" if guidance else "static"
+    assert [message.content for message in sent] == [
+        expected_system,
+        "Wie hoch ist der Verbrauch?",
+    ]
+
+
+def test_external_agent_requests_send_exactly_one_leading_system_message(
+    guidance_enabled, monkeypatch
+) -> None:
+    # Qwen-style chat templates reject a system message that is not the first.
+    from langchain_core.messages import SystemMessage
+
+    sent = _send_through_node(monkeypatch, _GUIDANCE, {"configurable": {"external_agent": True}})
+
+    assert [isinstance(message, SystemMessage) for message in sent] == [True, False]
+    system = sent[0].content
+    assert system.startswith("static\n\n")
+    assert "external agent through the agent API" in system
+    assert _GUIDANCE in system
+
+
+def test_merging_keeps_prompts_with_a_single_system_message_unchanged() -> None:
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from wotbot.agent.nodes import _merge_leading_system_messages
+
+    messages = [SystemMessage(content="static"), HumanMessage(content="hi")]
+    assert _merge_leading_system_messages(messages) is messages

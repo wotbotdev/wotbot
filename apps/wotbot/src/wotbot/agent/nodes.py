@@ -392,10 +392,29 @@ def _thread_id_from_config(config: RunnableConfig | None) -> str | None:
     return thread_id if isinstance(thread_id, str) and thread_id else None
 
 
+def _merge_leading_system_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
+    """Fold the system messages at the start of a prompt into one.
+
+    Some chat templates (Qwen, many vLLM-served models) reject any system
+    message that is not the very first message. The static node prompt stays
+    first, so provider prompt-prefix caching is unaffected.
+    """
+    leading = 0
+    while (
+        leading < len(messages)
+        and isinstance(messages[leading], SystemMessage)
+        and isinstance(messages[leading].content, str)
+    ):
+        leading += 1
+    if leading < 2:
+        return messages
+    merged = "\n\n".join(str(message.content) for message in messages[:leading])
+    return [SystemMessage(content=merged), *messages[leading:]]
+
+
 async def _with_workspace_guidance(messages: list[BaseMessage]) -> list[BaseMessage]:
-    # A separate system message right after the static node prompt: the node
-    # prompt stays byte-identical across workspaces, so provider prompt-prefix
-    # caching keeps working.
+    # Placed right after the static node prompt, which stays byte-identical
+    # across workspaces so provider prompt-prefix caching keeps working.
     if not workspaces_enabled():
         return messages
     guidance = await asyncio.to_thread(workspace_guidance)
@@ -431,6 +450,7 @@ async def _with_camera_context(
             ),
             *messages[1:],
         ]
+    messages = _merge_leading_system_messages(messages)
     if not camera_frames_enabled:
         return messages
     attachment = await attach_latest_camera_frame(
@@ -826,7 +846,9 @@ def make_background_job_node(
             branch_name="background_job",
             reasoning_effort=None,
         )
-        messages = await _with_workspace_guidance([system_message, *trimmed])
+        messages = _merge_leading_system_messages(
+            await _with_workspace_guidance([system_message, *trimmed])
+        )
         response = await runnable.ainvoke(messages)
         return {"messages": [response]}
 
