@@ -259,6 +259,52 @@ class DiscoveryService:
                 f"Discovery source '{source_record.id}' is unreachable: {type(exc).__name__}"
             ) from exc
 
+    async def list_source_resources(self, *, source_id: str, limit: int = 50) -> dict[str, Any]:
+        """The resources (future Things) a registered source offers, for automation.
+
+        Each item's external_id works with ``onboard_external`` when the provider
+        resolves resources by ID (``by_id``). Nothing is stored or onboarded.
+        """
+        source_record = await asyncio.to_thread(self._find_source, source_id.strip())
+        if source_record is None:
+            raise LookupError("Discovery source was not found")
+        provider = PROVIDERS.get(source_record.provider)
+        if provider is None:
+            raise SourceConfigurationError(
+                f"Discovery source '{source_record.id}' has an unknown provider"
+            )
+        source, public_http = await asyncio.to_thread(self._source_runtime, source_record)
+        try:
+            candidates = await provider.search(
+                source, prepare_search_intent("", source), limit, public_http=public_http
+            )
+        except SourceAuthenticationError as exc:
+            raise CredentialChallengeError(
+                status="credential_rejected",
+                source_id=source_record.id,
+                security_name=source_record.security_name,
+                scheme=source_record.security_scheme,
+                message="The external source rejected its stored credential.",
+            ) from exc
+        except (aiohttp.ClientError, OSError, TimeoutError) as exc:
+            raise SourceUnavailableError(
+                f"Discovery source '{source_record.id}' is unreachable: {type(exc).__name__}"
+            ) from exc
+        return {
+            "source_id": source_record.id,
+            "by_id": provider.resolves_by_id,
+            "items": [
+                {
+                    "external_id": candidate.external_id,
+                    "kind": candidate.kind,
+                    "title": candidate.title,
+                    "summary": candidate.summary,
+                }
+                for candidate in candidates
+                if candidate.kind != "source" and "onboard" in candidate.capabilities
+            ],
+        }
+
     async def onboard(self, *, candidate_id: str, thread_id: str) -> dict[str, Any]:
         candidate = await self._candidate_store.get(
             candidate_id,

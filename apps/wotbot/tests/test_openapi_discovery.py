@@ -628,6 +628,17 @@ class OpenApiProviderTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('"paths"', serialized)
         self.assertIn("spec_digest", serialized)
 
+    async def test_candidate_resolves_a_group_by_id_and_rejects_unknown_ids(self) -> None:
+        provider = OpenApiProvider()
+        parsed = parsed_api(api_document(operation_count=31))
+        with patch.object(provider, "_load", new=AsyncMock(return_value=parsed)):
+            groups = await provider.search(source(), SearchIntent(original=""), 10)
+            found = await provider.candidate(source(), groups[1].external_id)
+            with self.assertRaisesRegex(LookupError, "no Thing"):
+                await provider.candidate(source(), "unknown")
+        self.assertTrue(provider.resolves_by_id)
+        self.assertEqual(found, groups[1])
+
     async def test_onboarding_rejects_stale_digest(self) -> None:
         provider = OpenApiProvider()
         parsed = parsed_api()
@@ -780,6 +791,47 @@ class OpenApiRegistrationTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["onboarding"]["status"], "selection_required")
         self.assertEqual(result["source"]["dependent_thing_count"], 0)
         self.write.assert_not_called()
+
+    async def test_large_apis_list_their_things_and_onboard_each_by_id(self) -> None:
+        self.load.return_value = parsed_api(api_document(operation_count=31))
+        await self.register_explicitly()
+        things: dict[str, ThingRecord] = {}
+
+        def save(document: dict, **origin: str) -> tuple[ThingRecord, bool]:
+            thing, _ = self.save_thing(document, **origin)
+            things[origin["external_id"]] = thing
+            return thing, True
+
+        self.write.side_effect = save
+        listed = await self.service.list_source_resources(source_id=self.record.id)
+        with patch.object(
+            self.service,
+            "_find_existing",
+            side_effect=lambda **origin: things.get(origin["external_id"]),
+        ):
+            onboarded = [
+                await self.service.onboard_external(
+                    source_id=self.record.id, external_id=item["external_id"]
+                )
+                for item in listed["items"]
+            ]
+            again = await self.service.onboard_external(
+                source_id=self.record.id, external_id=listed["items"][0]["external_id"]
+            )
+
+        self.assertTrue(listed["by_id"])
+        self.assertEqual(len(listed["items"]), 2)
+        self.assertEqual({item["kind"] for item in listed["items"]}, {"api-service"})
+        self.assertTrue(all(result["created"] for result in onboarded))
+        self.assertFalse(again["created"])
+        self.assertEqual(len(things), 2)
+
+    async def test_listing_resources_of_an_unknown_source_is_a_lookup_error(self) -> None:
+        with (
+            patch.object(self.service, "_find_source", return_value=None),
+            self.assertRaises(LookupError),
+        ):
+            await self.service.list_source_resources(source_id="missing")
 
     async def test_a_catalog_is_not_automatically_searched_or_onboarded(self) -> None:
         self.record = replace(self.record, provider="udata")

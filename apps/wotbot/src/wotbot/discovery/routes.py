@@ -255,6 +255,31 @@ def remove_discovery_source_credential(
     return {"status": "deleted"}
 
 
+@router.get("/sources/{source_id}/resources")
+async def list_source_resources(
+    source_id: str,
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    _user: User = Depends(require_scopes(["sources:manage"])),
+) -> dict[str, Any]:
+    """List what a source offers to onboard, e.g. the Things of a large API.
+
+    For automation that onboards them with ``POST .../onboard`` afterwards.
+    """
+    try:
+        return await DiscoveryService(_settings(request)).list_source_resources(
+            source_id=source_id, limit=limit
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CredentialChallengeError as exc:
+        raise HTTPException(status_code=428, detail=exc.public()) from exc
+    except SourceConfigurationError as exc:
+        raise HTTPException(status_code=409, detail=_MISCONFIGURED_DETAIL) from exc
+    except ProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @router.post("/sources/{source_id}/onboard")
 async def onboard_source_resource(
     source_id: str,

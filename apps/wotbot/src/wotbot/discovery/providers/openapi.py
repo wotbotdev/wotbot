@@ -273,6 +273,28 @@ class OpenApiProvider(DiscoveryProvider):
         public_http: BoundedHttpClient | None = None,
     ) -> list[CandidateDraft]:
         parsed = await self._load(source, public_http=public_http)
+        return rank_candidates(
+            intent, self._candidates(source, parsed), limit=limit, require_match=False
+        )
+
+    async def candidate(
+        self,
+        source: SourceDefinition,
+        external_id: str,
+        *,
+        public_http: BoundedHttpClient | None = None,
+    ) -> CandidateDraft:
+        """One operation group (one future Thing) of the API, by its external ID."""
+        parsed = await self._load(source, public_http=public_http)
+        for candidate, _search_text in self._candidates(source, parsed):
+            if candidate.external_id == external_id:
+                return candidate
+        raise LookupError(f"The API offers no Thing with external ID '{external_id}'")
+
+    def _candidates(
+        self, source: SourceDefinition, parsed: ParsedApi
+    ) -> list[tuple[CandidateDraft, str]]:
+        """Every operation group as a candidate, with the text it is ranked by."""
         candidates: list[tuple[CandidateDraft, str]] = []
         for group in operation_groups(parsed.operations):
             external_id = group_external_id(
@@ -318,7 +340,7 @@ class OpenApiProvider(DiscoveryProvider):
                     f"{parsed.title} {parsed.description} {group.label} {summaries}",
                 )
             )
-        return rank_candidates(intent, candidates, limit=limit, require_match=False)
+        return candidates
 
     async def onboarding_document(
         self,
