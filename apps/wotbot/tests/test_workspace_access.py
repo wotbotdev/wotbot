@@ -306,3 +306,43 @@ class WorkspaceAccessTestCase(unittest.TestCase):
 
         missing = client.patch("/api/workspaces/gamma", headers=manager, json={"title": "Gamma"})
         self.assertEqual(missing.status_code, 404)
+
+    # -- WoT runtime proxy ----------------------------------------------------
+
+    def test_the_runtime_only_operates_things_of_the_caller_workspace(self) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from wotbot.api.wot_runtime import router as runtime_router
+        from wotbot.clients.wot_runtime import WotRuntimeClient
+
+        for workspace_id in ("alpha", "beta"):
+            with workspace_scope(workspace_id), self.sessions() as session:
+                create_thing(session, _td(f"urn:test:{workspace_id}-lamp"))
+                session.commit()
+        app = FastAPI()
+        app.include_router(runtime_router)
+        client = TestClient(app)
+        alpha = self._bearer(self._key("alpha", ["things:read", "things:write"]))
+        runtime = AsyncMock(return_value={"success": True})
+
+        def read(thing_id: str):
+            return client.post(
+                "/api/wot/runtime/read-property",
+                headers=alpha,
+                json={"thing_id": thing_id, "property_name": "on"},
+            )
+
+        with patch.object(WotRuntimeClient, "_request", runtime):
+            own = read("urn:test:alpha-lamp")
+            foreign = read("urn:test:beta-lamp")
+            action = client.post(
+                "/api/wot/runtime/invoke-action",
+                headers=alpha,
+                json={"thing_id": "urn:test:beta-lamp", "action_name": "toggle"},
+            )
+
+        self.assertEqual(own.status_code, 200, own.text)
+        self.assertEqual(foreign.status_code, 404, foreign.text)
+        self.assertEqual(action.status_code, 404, action.text)
+        sent = [call.args[2]["thing_id"] for call in runtime.await_args_list]
+        self.assertEqual(sent, ["urn:test:alpha-lamp"])

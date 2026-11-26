@@ -99,6 +99,8 @@ class RemoveSubscriptionBody(BaseModel):
 async def _call(coro) -> dict[str, Any]:
     try:
         return await coro
+    except LookupError as exc:  # Thing not visible in the caller's workspace
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:  # pragma: no cover - transport/connection failures

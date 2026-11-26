@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import aiohttp
 
 from wotbot.clients._base import setting_value as _setting_value
 from wotbot.core.config import Settings
+from wotbot.workspaces.visibility import require_visible_thing
 
 
 class WotRuntimeClient:
@@ -52,6 +54,11 @@ class WotRuntimeClient:
     async def get_runtime_health(self) -> dict[str, Any]:
         return await self._request("GET", "/health")
 
+    @staticmethod
+    async def _require_visible(thing_id: str) -> None:
+        # The runtime itself sees every workspace, so check the caller's first.
+        await asyncio.to_thread(require_visible_thing, thing_id)
+
     async def subscription_status(self, subscription_id):
         return await self._request(
             "POST", "/runtime/subscription-status", {"subscription_id": subscription_id}
@@ -68,6 +75,7 @@ class WotRuntimeClient:
         uri_variables: dict[str, Any] | None = None,
         form_index: int | None = None,
     ) -> dict[str, Any]:
+        await self._require_visible(thing_id)
         return await self._request(
             "POST",
             "/runtime/read-property",
@@ -90,6 +98,7 @@ class WotRuntimeClient:
         uri_variables: dict[str, Any] | None = None,
         form_index: int | None = None,
     ) -> dict[str, Any]:
+        await self._require_visible(thing_id)
         return await self._request(
             "POST",
             "/runtime/write-property",
@@ -116,6 +125,7 @@ class WotRuntimeClient:
         form_index: int | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        await self._require_visible(thing_id)
         return await self._request(
             "POST",
             "/runtime/invoke-action",
@@ -141,6 +151,7 @@ class WotRuntimeClient:
         form_index: int | None = None,
         subscription_namespace: str | None = None,
     ) -> dict[str, Any]:
+        await self._require_visible(thing_id)
         return await self._request(
             "POST",
             "/runtime/observe-property",
@@ -166,6 +177,7 @@ class WotRuntimeClient:
         form_index: int | None = None,
         subscription_namespace: str | None = None,
     ) -> dict[str, Any]:
+        await self._require_visible(thing_id)
         return await self._request(
             "POST",
             "/runtime/subscribe-event",
