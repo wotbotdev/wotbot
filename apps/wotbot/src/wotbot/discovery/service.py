@@ -253,6 +253,11 @@ class DiscoveryService:
                 scheme=source_record.security_scheme,
                 message="The external source rejected its stored credential.",
             ) from exc
+        except (aiohttp.ClientError, OSError, TimeoutError) as exc:
+            # DNS failures and refused connections are not ProviderErrors.
+            raise SourceUnavailableError(
+                f"Discovery source '{source_record.id}' is unreachable: {type(exc).__name__}"
+            ) from exc
 
     async def onboard(self, *, candidate_id: str, thread_id: str) -> dict[str, Any]:
         candidate = await self._candidate_store.get(

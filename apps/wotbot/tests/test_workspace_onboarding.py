@@ -181,3 +181,17 @@ class WorkspaceOnboardingTestCase(unittest.TestCase):
         response = self._onboard(self.alpha, source_id, external_id="dataset-1")
         self.assertEqual(response.status_code, 422, response.text)
         self.assertIn("cannot onboard resources by ID", response.json()["detail"])
+
+    def test_an_unreachable_participant_is_reported_as_a_gateway_error(self) -> None:
+        source_id = self._register(self.alpha)
+        with patch(
+            "wotbot.discovery.providers.tx_bootstrap.source_json",
+            new=AsyncMock(side_effect=OSError("getaddrinfo failed")),
+        ):
+            response = self.client.post(
+                f"/api/discovery/sources/{source_id}/onboard",
+                headers=self.alpha,
+                json={"external_id": "entry-1"},
+            )
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertIn("unreachable", response.json()["detail"])
