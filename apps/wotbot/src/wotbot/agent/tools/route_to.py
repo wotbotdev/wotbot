@@ -60,10 +60,19 @@ def make_route_to_tool(current_branch: str | None = None) -> Any:
                     ],
                 }
             )
+        # Only the target branch reads this result: the calling branch stops
+        # once ``next`` is set. Without an explicit instruction the target
+        # branch tends to announce the work and end the turn.
         return Command(
             update={
                 "next": intent,
-                "messages": [ToolMessage(f"Continuing in {intent}.", tool_call_id=tool_call_id)],
+                "messages": [
+                    ToolMessage(
+                        f"Now in {intent}. Continue the user's task now with this "
+                        "branch's tools; do not only announce what you will do.",
+                        tool_call_id=tool_call_id,
+                    )
+                ],
             }
         )
 
