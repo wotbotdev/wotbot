@@ -2,7 +2,8 @@
 
 Implements the client side of OGC SensorThings API Part 1: Sensing, versions
 1.0 and 1.1 (https://docs.ogc.org/is/18-088/18-088.html). Only the read side
-is used; the create-update-delete, batch, and MQTT extensions are not.
+is used: reading over HTTP and receiving updates over MQTT. The
+create-update-delete and batch extensions are not.
 
 Configuration
     ``url``
@@ -28,7 +29,13 @@ Onboarding turns one STA Thing into one WoT Thing. Each of its first
   ``from``, ``to``, and ``limit`` into an OData query, pages through
   ``@iot.nextLink`` within fixed bounds, and returns the Observations in
   chronological order. OData's ``$``-prefixed parameter names are not valid
-  URI-template variables, which is why history cannot be a direct form.
+  URI-template variables, which is why history cannot be a direct form; and
+* a ``<name>_observation`` event subscribing to the Datastream's
+  ``v1.x/Datastreams(<id>)/Observations`` MQTT topic, when the service root
+  advertises a receive-updates MQTT endpoint. The broker must be on the
+  service's own host, so a service cannot point the runtime at another
+  machine, and the topic travels in the href path because that is where
+  node-wot's MQTT binding reads it. Like the property, it is ``nosec`` only.
 
 MultiDatastreams are not modeled. There is no refresh.
 
@@ -50,6 +57,7 @@ from urllib.parse import quote, urlparse
 
 from wotbot.discovery.detection import DetectionContext, origin
 from wotbot.discovery.errors import (
+    ProviderError,
     SourceAuthenticationError,
     SourceProtocolError,
     SourceUnavailableError,
@@ -94,6 +102,11 @@ _ODATA_SAFE = "(),:;'@$=*/"
 # An entity key is a number or an OData string literal with doubled quotes.
 _KEY = r"(?:\d+|'(?:[^']|'')*')"
 _HISTORY_PATH = re.compile(rf"/Datastreams\({_KEY}\)/Observations")
+_MQTT_UPDATES = "receive-updates-via-mqtt/receive-updates"
+_MQTT_CONTEXT = {"mqv": "https://www.w3.org/2019/wot/mqtt#"}
+# What a topic keeps unescaped in an mqtt:// URL path, without the + and #
+# wildcards, so the subscribed filter is exactly the Datastream's topic.
+_MQTT_TOPIC = re.compile(r"[A-Za-z0-9._~()'!*$&,;=:@/-]+")
 _VERSION_ROOT = re.compile(r"^(.*?/v1\.[01])(?:/|$)")
 
 
@@ -156,6 +169,39 @@ def service_root(document: Any, document_url: str) -> str | None:
     if not is_http_endpoint(base) or origin(base) != origin(document_url):
         return None
     return base
+
+
+def mqtt_broker(root: Any, base: str) -> str | None:
+    """Return the receive-updates MQTT broker a service root names on its own host."""
+
+    settings = root.get("serverSettings") if isinstance(root, dict) else None
+    if not isinstance(settings, dict):
+        return None
+    host = urlparse(base).hostname
+    for name, value in settings.items():
+        if not str(name).endswith(_MQTT_UPDATES) or not isinstance(value, dict):
+            continue
+        endpoints = value.get("endpoints")
+        for endpoint in endpoints if isinstance(endpoints, list) else ():
+            if not isinstance(endpoint, str):
+                continue
+            parsed = urlparse(endpoint.strip())
+            try:
+                port = parsed.port
+            except ValueError:
+                continue
+            if (
+                parsed.scheme in {"mqtt", "mqtts"}
+                and host
+                and parsed.hostname == host
+                and parsed.username is None
+                and parsed.password is None
+                and parsed.path in {"", "/"}
+                and not parsed.query
+                and not parsed.fragment
+            ):
+                return f"{parsed.scheme}://{host}" + (f":{port}" if port else "")
+    return None
 
 
 def property_slug(datastream_name: str, thing_name: str) -> str:
@@ -434,11 +480,19 @@ class SensorThingsProvider(DiscoveryProvider):
             )
         if not isinstance(thing, dict) or entity_key(thing.get("@iot.id")) != key:
             raise SourceProtocolError("SensorThings Thing identity does not match its listing")
+        direct_reads = source.security_scheme == "nosec"
+        broker = None
+        if direct_reads:
+            try:
+                broker = mqtt_broker(await self._get_json(source, base, client=client), base)
+            except ProviderError:
+                broker = None
         return thing_document(
             thing,
             base=base,
             thing_id=provider_thing_id(self.name, candidate.source_id, key),
-            direct_reads=source.security_scheme == "nosec",
+            direct_reads=direct_reads,
+            mqtt_broker=broker,
         )
 
     async def invoke_api(
@@ -542,10 +596,14 @@ def thing_document(
     base: str,
     thing_id: str,
     direct_reads: bool,
+    mqtt_broker: str | None = None,
 ) -> OnboardingResult:
     """Compile one STA Thing, with its Datastreams expanded, into a TD."""
 
     key = entity_key(thing.get("@iot.id"))
+    version = base.rstrip("/").rsplit("/", 1)[-1]
+    if not direct_reads or not re.fullmatch(r"v1\.[01]", version):
+        mqtt_broker = None
     thing_name = text(thing.get("name")) or f"Thing {key}"
     raw_datastreams = [item for item in thing.get("Datastreams") or () if isinstance(item, dict)]
     warnings: list[str] = []
@@ -562,6 +620,7 @@ def thing_document(
 
     properties: dict[str, Any] = {}
     actions: dict[str, Any] = {}
+    events: dict[str, Any] = {}
     used: set[str] = set()
     for datastream in raw_datastreams:
         try:
@@ -678,8 +737,30 @@ def thing_document(
             ],
         }
 
+        topic = f"{version}/Datastreams({datastream_key})/Observations"
+        if mqtt_broker and _MQTT_TOPIC.fullmatch(topic):
+            events[f"{slug}_observation"] = {
+                "title": f"New observation: {datastream_name}"[:500],
+                "description": (
+                    "Pushed over MQTT each time the service stores a new Observation "
+                    "of this Datastream; the data is the full Observation entity. " + description
+                ).strip(),
+                "data": observation,
+                "wotbot:generatedBy": PROVIDER_NAME,
+                "forms": [
+                    {
+                        "href": f"{mqtt_broker}/{topic}",
+                        "op": ["subscribeevent", "unsubscribeevent"],
+                        "contentType": "application/json",
+                        "mqv:filter": topic,
+                    }
+                ],
+            }
+        elif mqtt_broker:
+            warnings.append(f"Datastream {datastream_key} has no usable MQTT topic")
+
     document: dict[str, Any] = {
-        "@context": [TD_CONTEXT, WOTBOT_CONTEXT],
+        "@context": [TD_CONTEXT, WOTBOT_CONTEXT, *([_MQTT_CONTEXT] if events else [])],
         "id": thing_id,
         "title": thing_name[:500],
         "description": text(thing.get("description"))[:2000],
@@ -709,4 +790,6 @@ def thing_document(
         document["properties"] = properties
     if actions:
         document["actions"] = actions
+    if events:
+        document["events"] = events
     return OnboardingResult(document=document, warnings=tuple(warnings))

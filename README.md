@@ -169,8 +169,10 @@ one selected result creates one resource Thing linked to its trusted source reco
 a dataset Thing for uData/DCAT, an MCP-backed Thing for ToolHive, an asset
 Thing for EDC, the unmodified published TD for a TDD entry, or a sensor Thing for
 an STA Thing: one property per Datastream reads its latest Observation directly,
-and one `<datastream>_history` action returns Observations for a `from`/`to`
-window. An OpenAPI source deterministically groups supported operations
+one `<datastream>_history` action returns Observations for a `from`/`to`
+window, and, when the service advertises an MQTT broker on its own host, one
+`<datastream>_observation` event pushes each new Observation for event-triggered
+jobs. An OpenAPI source deterministically groups supported operations
 and compiles the selected group into ordinary HTTP-backed TD actions; the raw
 specification never enters model context. Generated OpenAPI Things can be
 regenerated explicitly from their detail page after reviewing a bounded diff.

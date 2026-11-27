@@ -26,6 +26,7 @@ from wotbot.discovery.providers.public import detectors
 from wotbot.discovery.providers.sensorthings import (
     SensorThingsProvider,
     entity_key,
+    mqtt_broker,
     property_slug,
 )
 from wotbot.discovery.service import _provider_action_target
@@ -252,14 +253,78 @@ class SensorThingsSearchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rejected.requests[0][2]["Authorization"], "Bearer secret")
 
 
+def mqtt_root(*endpoints: Any) -> dict[str, Any]:
+    return {
+        **root_document(),
+        "serverSettings": {
+            "conformance": [],
+            "http://www.opengis.net/spec/iot_sensing/1.1/req/receive-updates-via-mqtt/"
+            "receive-updates": {"endpoints": list(endpoints)},
+        },
+    }
+
+
 class SensorThingsOnboardingTest(unittest.IsolatedAsyncioTestCase):
-    async def onboard(self, thing: Any, **source_overrides: Any):
+    async def onboard(self, thing: Any, *, root: Any = None, **source_overrides: Any):
         status = 404 if thing is None else 200
-        client = FakeClient(routes({f"{BASE}/Things(12074)": (status, thing)}))
-        with patch("wotbot.discovery.providers.sensorthings.source_client", return_value=client):
+        table: dict[str, Any] = {f"{BASE}/Things(12074)": (status, thing)}
+        if root is not None:
+            table[BASE] = root
+        self.client = FakeClient(routes(table))
+        with patch(
+            "wotbot.discovery.providers.sensorthings.source_client", return_value=self.client
+        ):
             return await SensorThingsProvider().onboarding_document(
                 source(**source_overrides), candidate(), runtime=None
             )
+
+    async def test_advertised_mqtt_updates_become_observation_events(self) -> None:
+        result = await self.onboard(COUNTER, root=mqtt_root("mqtt://sta.example:1883"))
+        document = validate_document(result.document)
+
+        self.assertEqual(result.warnings, ())
+        self.assertIn({"mqv": "https://www.w3.org/2019/wot/mqtt#"}, document["@context"])
+        event = document["events"]["kfz_aufkommen_an_im_5_min_intervall_observation"]
+        self.assertEqual(
+            event["forms"],
+            [
+                {
+                    "href": "mqtt://sta.example:1883/v1.1/Datastreams(31172)/Observations",
+                    "op": ["subscribeevent", "unsubscribeevent"],
+                    "contentType": "application/json",
+                    "mqv:filter": "v1.1/Datastreams(31172)/Observations",
+                }
+            ],
+        )
+        self.assertEqual(event["data"]["properties"]["result"]["unit"], "Anzahl")
+        self.assertEqual(len(document["events"]), 2)
+
+    async def test_events_need_the_services_own_broker_and_no_credential(self) -> None:
+        for name, root in {
+            "no settings": root_document(),
+            "foreign broker": mqtt_root("mqtt://broker.elsewhere.example:1883"),
+            "not mqtt": mqtt_root("https://sta.example/mqtt"),
+        }.items():
+            with self.subTest(name):
+                result = await self.onboard(COUNTER, root=root)
+                self.assertNotIn("events", result.document)
+                self.assertNotIn("mqv", json.dumps(result.document["@context"]))
+
+        result = await self.onboard(
+            COUNTER,
+            root=mqtt_root("mqtt://sta.example:1883"),
+            security_scheme="apikey",
+            credential={"apiKey": "secret"},
+        )
+        self.assertNotIn("events", result.document)
+        self.assertEqual(len(self.client.requests), 1)
+
+    async def test_skips_events_whose_topic_would_not_survive_the_href(self) -> None:
+        thing = {**COUNTER, "Datastreams": [datastream("a b", "Count"), datastream("c#", "X")]}
+        result = await self.onboard(thing, root=mqtt_root("mqtts://sta.example"))
+        self.assertNotIn("events", result.document)
+        self.assertEqual(len(result.warnings), 2)
+        self.assertIn("no usable MQTT topic", result.warnings[0])
 
     async def test_compiles_datastreams_into_latest_properties_and_history_actions(
         self,
@@ -329,6 +394,17 @@ class SensorThingsOnboardingTest(unittest.IsolatedAsyncioTestCase):
             await SensorThingsProvider().onboarding_document(
                 source(), candidate("1) or (2"), runtime=None
             )
+
+    def test_broker_must_be_a_bare_endpoint_on_the_service_host(self) -> None:
+        self.assertEqual(mqtt_broker(mqtt_root("mqtts://STA.example"), BASE), "mqtts://sta.example")
+        for endpoint in (
+            "mqtt://user:pw@sta.example:1883",
+            "mqtt://sta.example:1883/prefix",
+            "mqtt://sta.example:99999",
+            7,
+        ):
+            with self.subTest(endpoint):
+                self.assertIsNone(mqtt_broker(mqtt_root(endpoint), BASE))
 
     def test_names_and_keys(self) -> None:
         self.assertEqual(entity_key(7), "7")
