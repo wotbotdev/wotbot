@@ -56,7 +56,9 @@ and [MCP](https://modelcontextprotocol.io/) are agent-to-agent and agent-to-tool
 protocols WoTBot both speaks and exposes. [DCAT](https://www.w3.org/TR/vocab-dcat-3/)
 and [uData](https://github.com/opendatateam/udata) are open-data catalog standards.
 A [WoT Thing Description Directory](https://www.w3.org/TR/wot-discovery/#exploration-directory-api)
-(TDD) is the W3C WoT Discovery service that lists registered TDs.
+(TDD) is the W3C WoT Discovery service that lists registered TDs. The OGC
+[SensorThings API](https://docs.ogc.org/is/18-088/18-088.html) (STA) serves sensor
+Things, their Datastreams, and Observations over an OData-style REST API.
 [EDC](https://eclipse-edc.github.io/documentation/) is the Eclipse Dataspace
 Connector, where access to a dataset is negotiated against an
 [ODRL](https://www.w3.org/TR/odrl-model/) policy before any transfer.
@@ -142,9 +144,10 @@ one selected source with `discover_external`, and finally uses
 `onboard_candidate` to create a resource Thing.
 
 Built-in providers cover ToolHive, uData, bounded DCAT catalogs, WoT Thing
-Description Directories, the EDC v3 Management API, and direct OpenAPI 3.0/3.1 or
-Swagger 2.0 documents. uData portals are detected through a generic API probe,
-and a TDD through its `/.well-known/wot` introduction. ToolHive, EDC,
+Description Directories, SensorThings API 1.0/1.1 services, the EDC v3 Management
+API, and direct OpenAPI 3.0/3.1 or Swagger 2.0 documents. uData portals are
+detected through a generic API probe, a TDD through its `/.well-known/wot`
+introduction, and an STA service through its `/v1.x` root document. ToolHive, EDC,
 private endpoints, and sources that cannot be detected are registered explicitly
 through the dedicated Sources page or API. Chat-initiated registration always
 opens the same confirmation form before probing or persistence.
@@ -164,7 +167,10 @@ as Things, and are never created at startup.
 Source search results are temporary and scoped to the conversation. Onboarding
 one selected result creates one resource Thing linked to its trusted source record:
 a dataset Thing for uData/DCAT, an MCP-backed Thing for ToolHive, an asset
-Thing for EDC, or the unmodified published TD for a TDD entry. An OpenAPI source deterministically groups supported operations
+Thing for EDC, the unmodified published TD for a TDD entry, or a sensor Thing for
+an STA Thing: one property per Datastream reads its latest Observation directly,
+and one `<datastream>_history` action returns Observations for a `from`/`to`
+window. An OpenAPI source deterministically groups supported operations
 and compiles the selected group into ordinary HTTP-backed TD actions; the raw
 specification never enters model context. Generated OpenAPI Things can be
 regenerated explicitly from their detail page after reviewing a bounded diff.
