@@ -214,7 +214,19 @@ class SensorThingsSearchTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params["$orderby"], "@iot.id desc")
         self.assertEqual([item.external_id for item in found], ["12074", "9"])
         self.assertIn("Datastreams: Kfz 5-Min; Kfz 1-Tag", found[0].summary)
+        self.assertEqual(params["$expand"], "Datastreams($select=name;$top=21)")
         self.assertEqual(found[0].links[0]["url"], f"{BASE}/Things(12074)")
+
+    async def test_summary_marks_a_cut_off_datastream_list(self) -> None:
+        crowded = {**COUNTER, "Datastreams": [{"name": f"D{index}"} for index in range(21)]}
+        client = FakeClient(routes({f"{BASE}/Things": {"value": [crowded]}}))
+        [found] = await SensorThingsProvider().search(
+            source(),
+            SearchIntent(original=""),
+            10,
+            public_http=client,  # type: ignore[arg-type]
+        )
+        self.assertTrue(found.summary.endswith("D4 (+at least 16 more)"), found.summary)
 
     async def test_falls_back_to_any_term_and_escapes_quotes(self) -> None:
         def handler(_path: str, params: dict[str, str]) -> Response:
@@ -358,14 +370,21 @@ class SensorThingsOnboardingTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(target["path"], "/Datastreams(31172)/Observations")
         self.assertEqual(target["query_variables"], ("from", "to", "limit"))
 
-    async def test_generated_history_actions_are_protected(self) -> None:
-        document = validate_document((await self.onboard(COUNTER)).document)
-        edited = json.loads(json.dumps(document))
-        action = edited["actions"]["kfz_aufkommen_an_im_5_min_intervall_history"]
-        action["forms"][0]["wotbot:path"] = "/Things(1)/Observations"
-        with self.assertRaises(HTTPException) as caught:
-            _validate_protected_resource_update(document, edited, provider="sensorthings")
-        self.assertEqual(caught.exception.status_code, 409)
+    async def test_generated_forms_are_protected(self) -> None:
+        result = await self.onboard(COUNTER, root=mqtt_root("mqtt://sta.example:1883"))
+        document = validate_document(result.document)
+        name = "kfz_aufkommen_an_im_5_min_intervall"
+        for kind, affordance, field, value in (
+            ("actions", f"{name}_history", "wotbot:path", "/Things(1)/Observations"),
+            ("properties", name, "href", "http://internal.example/secret"),
+            ("events", f"{name}_observation", "href", "mqtt://broker.elsewhere.example/x"),
+        ):
+            with self.subTest(kind):
+                edited = json.loads(json.dumps(document))
+                edited[kind][affordance]["forms"][0][field] = value
+                with self.assertRaises(HTTPException) as caught:
+                    _validate_protected_resource_update(document, edited, provider="sensorthings")
+                self.assertEqual(caught.exception.status_code, 409)
 
     async def test_credentialed_sources_get_history_only(self) -> None:
         result = await self.onboard(
@@ -385,6 +404,36 @@ class SensorThingsOnboardingTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("count_2_history", result.document["actions"])
         self.assertIn("first 50", result.warnings[0])
 
+        crowded = {
+            **COUNTER,
+            "Datastreams": [
+                datastream(7, "Temp 5"),
+                datastream(3, "Temp"),
+                datastream(5, "Temp"),
+            ],
+        }
+        result = await self.onboard(crowded)
+        self.assertEqual(list(result.document["properties"]), ["temp_5", "temp", "temp_5_2"])
+
+    async def test_string_keys_are_encoded_in_every_url(self) -> None:
+        thing = {**COUNTER, "@iot.id": "a#b", "Datastreams": [datastream("x?y", "Count")]}
+        client = FakeClient(routes({f"{BASE}/Things('a%23b')": thing}))
+        with patch("wotbot.discovery.providers.sensorthings.source_client", return_value=client):
+            result = await SensorThingsProvider().onboarding_document(
+                source(), candidate("'a#b'"), runtime=None
+            )
+        document = validate_document(result.document)
+        self.assertEqual(document["links"][0]["href"], f"{BASE}/Things('a%23b')")
+        self.assertTrue(
+            document["properties"]["count"]["forms"][0]["href"].startswith(
+                f"{BASE}/Datastreams('x%3Fy')/Observations?"
+            )
+        )
+        target = _provider_action_target(
+            document, thing_id=document["id"], action="count_history", provider="sensorthings"
+        )
+        self.assertEqual(target["path"], "/Datastreams('x%3Fy')/Observations")
+
     async def test_refuses_stale_or_substituted_things(self) -> None:
         with self.assertRaises(StaleCandidateError):
             await self.onboard(None)
@@ -396,6 +445,10 @@ class SensorThingsOnboardingTest(unittest.IsolatedAsyncioTestCase):
             )
 
     def test_broker_must_be_a_bare_endpoint_on_the_service_host(self) -> None:
+        self.assertEqual(
+            mqtt_broker(mqtt_root("mqtt://[fd00::1]:1883"), "http://[fd00::1]:8080/v1.1"),
+            "mqtt://[fd00::1]:1883",
+        )
         self.assertEqual(mqtt_broker(mqtt_root("mqtts://STA.example"), BASE), "mqtts://sta.example")
         for endpoint in (
             "mqtt://user:pw@sta.example:1883",
@@ -490,15 +543,39 @@ class SensorThingsHistoryTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    async def test_refuses_pagination_that_leaves_the_service(self) -> None:
-        def handler(_path: str, _params: dict[str, str]) -> Response:
+    async def test_pagination_is_rebased_onto_the_registered_root(self) -> None:
+        def handler(_path: str, params: dict[str, str]) -> Response:
+            if "$skip" in params:
+                return 200, {"value": observations(22, 1)}
             return 200, {
                 "value": observations(23, 1),
-                "@iot.nextLink": "https://elsewhere.example/v1.1/Observations",
+                # A server behind a TLS proxy may call itself http:// on an internal host.
+                "@iot.nextLink": f"http://internal:8080/v1.1{self.PATH}?$skip=1",
             }
 
-        with self.assertRaises(SourceProtocolError):
-            await self.history(handler)
+        body, client = await self.history(handler, uri_variables={"limit": 2})
+        self.assertEqual(body["count"], 2)
+        self.assertEqual(client.requests[1][0], f"{BASE}{self.PATH}")
+
+    async def test_refuses_pagination_that_leaves_the_service_root(self) -> None:
+        for link in ("https://sta.example/v1.0/Observations", 7):
+
+            def handler(_path: str, _params: dict[str, str], link: Any = link) -> Response:
+                return 200, {"value": observations(23, 1), "@iot.nextLink": link}
+
+            with self.subTest(link), self.assertRaises(SourceProtocolError):
+                await self.history(handler)
+
+    async def test_date_only_to_covers_the_whole_day(self) -> None:
+        _body, client = await self.history(
+            lambda _path, _params: (200, {"value": []}),
+            uri_variables={"from": "0001-01-01", "to": "2026-11-26"},
+        )
+        self.assertEqual(
+            client.requests[0][1]["$filter"],
+            "phenomenonTime ge 0001-01-01T00:00:00.000Z and "
+            "phenomenonTime le 2026-11-26T23:59:59.999Z",
+        )
 
     async def test_rejects_invalid_requests_before_fetching(self) -> None:
         cases: dict[str, dict[str, Any]] = {

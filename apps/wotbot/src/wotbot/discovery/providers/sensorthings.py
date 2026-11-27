@@ -51,7 +51,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -89,6 +89,7 @@ from wotbot.discovery.search import rank_candidates
 PROVIDER_NAME = "sensorthings"
 _MAX_BYTES = 4 * 1024 * 1024
 _SEARCH_WINDOW = 100
+_SUMMARY_DATASTREAMS = 20
 _MAX_SEARCH_TERMS = 6
 _MAX_DATASTREAMS = 50
 _HISTORY_DEFAULT_LIMIT = 1000
@@ -101,7 +102,9 @@ _MAX_ATTRIBUTE_BYTES = 4096
 _ODATA_SAFE = "(),:;'@$=*/"
 # An entity key is a number or an OData string literal with doubled quotes.
 _KEY = r"(?:\d+|'(?:[^']|'')*')"
-_HISTORY_PATH = re.compile(rf"/Datastreams\({_KEY}\)/Observations")
+# The same key once percent-encoded for a path: no raw separators remain.
+_PATH_KEY = r"(?:\d+|'(?:[^'/?#\\]|'')*')"
+_HISTORY_PATH = re.compile(rf"/Datastreams\({_PATH_KEY}\)/Observations")
 _MQTT_UPDATES = "receive-updates-via-mqtt/receive-updates"
 _MQTT_CONTEXT = {"mqv": "https://www.w3.org/2019/wot/mqtt#"}
 # What a topic keeps unescaped in an mqtt:// URL path, without the + and #
@@ -122,6 +125,12 @@ def entity_key(value: Any) -> str:
     raise SourceProtocolError("SensorThings entity has no usable @iot.id")
 
 
+def key_segment(key: str) -> str:
+    """Percent-encode a key literal for a resource path, keeping its quotes."""
+
+    return quote(key, safe="'")
+
+
 def odata_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -130,6 +139,23 @@ def query_string(params: dict[str, str]) -> str:
     """Encode OData system options, keeping their ``$`` names literal."""
 
     return "&".join(f"{name}={quote(value, safe=_ODATA_SAFE)}" for name, value in params.items())
+
+
+def rebased_next_link(next_link: Any, base: str) -> str:
+    """Follow ``@iot.nextLink`` through the registered root, not the server's spelling.
+
+    Behind a proxy a server may name itself ``http://`` or by an internal host.
+    Only the path and query are taken from the link, and the path must stay
+    beneath the root, so pagination never reaches another host or service.
+    """
+
+    if not isinstance(next_link, str) or len(next_link) > 8192:
+        raise SourceProtocolError("SensorThings pagination link is invalid")
+    link = urlparse(next_link)
+    root = urlparse(base)
+    if not link.path.startswith(root.path.rstrip("/") + "/") or link.fragment:
+        raise SourceProtocolError("SensorThings pagination left the service root")
+    return origin(base) + link.path + (f"?{link.query}" if link.query else "")
 
 
 def search_filter(terms: list[str], *, require_all: bool) -> str:
@@ -200,7 +226,8 @@ def mqtt_broker(root: Any, base: str) -> str | None:
                 and not parsed.query
                 and not parsed.fragment
             ):
-                return f"{parsed.scheme}://{host}" + (f":{port}" if port else "")
+                literal = f"[{host}]" if ":" in host else host
+                return f"{parsed.scheme}://{literal}" + (f":{port}" if port else "")
     return None
 
 
@@ -217,7 +244,9 @@ def property_slug(datastream_name: str, thing_name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", ascii_label).strip("_")[:60].rstrip("_") or "datastream"
 
 
-def parse_time(name: str, value: Any) -> str | None:
+def parse_time(name: str, value: Any, *, end_of_day: bool = False) -> str | None:
+    """Normalize an ISO 8601 bound to UTC; a bare date as ``to`` means its last instant."""
+
     if value is None or value == "":
         return None
     if not isinstance(value, str) or len(value) > 64:
@@ -226,9 +255,11 @@ def parse_time(name: str, value: Any) -> str | None:
         parsed = datetime.fromisoformat(value.strip())
     except ValueError as exc:
         raise ValueError(f"'{name}' must be an ISO 8601 date or date-time") from exc
+    if end_of_day and re.fullmatch(r"\d{4}-?\d{2}-?\d{2}", value.strip()):
+        parsed += timedelta(days=1, milliseconds=-1)
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return parsed.astimezone(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def parse_limit(value: Any) -> int:
@@ -374,7 +405,7 @@ class SensorThingsProvider(DiscoveryProvider):
             "$top": str(_SEARCH_WINDOW),
             "$orderby": "@iot.id desc",
             "$select": "@iot.id,name,description,properties",
-            "$expand": "Datastreams($select=name;$top=20)",
+            "$expand": f"Datastreams($select=name;$top={_SUMMARY_DATASTREAMS + 1})",
         }
         if filter_expression:
             params["$filter"] = filter_expression
@@ -424,7 +455,10 @@ class SensorThingsProvider(DiscoveryProvider):
             summary = description
             if datastreams:
                 listed = "; ".join(datastreams[:5])
-                more = f" (+{len(datastreams) - 5} more)" if len(datastreams) > 5 else ""
+                # One past the cap was fetched, so a capped count is a true lower bound.
+                others = len(datastreams) - 5
+                bound = "at least " if len(datastreams) > _SUMMARY_DATASTREAMS else ""
+                more = f" (+{bound}{others} more)" if others > 0 else ""
                 summary = f"{description} — Datastreams: {listed}{more}".strip(" —")
             candidates.append(
                 (
@@ -438,7 +472,7 @@ class SensorThingsProvider(DiscoveryProvider):
                         links=(
                             {
                                 "title": "SensorThings entity",
-                                "url": f"{base}/Things({key})",
+                                "url": f"{base}/Things({key_segment(key)})",
                                 "media_type": "application/json",
                             },
                         ),
@@ -471,7 +505,7 @@ class SensorThingsProvider(DiscoveryProvider):
                 "),Locations($select=location;$top=1)"
             ),
         }
-        url = f"{base}/Things({key})?{query_string(params)}"
+        url = f"{base}/Things({key_segment(key)})?{query_string(params)}"
         client = source_client(source, max_bytes=_MAX_BYTES)
         thing = await self._get_json(source, url, client=client)
         if thing is None:
@@ -518,7 +552,7 @@ class SensorThingsProvider(DiscoveryProvider):
         }
         variables.update(uri_variables)
         start = parse_time("from", variables.get("from"))
-        end = parse_time("to", variables.get("to"))
+        end = parse_time("to", variables.get("to"), end_of_day=True)
         if start and end and start > end:
             raise ValueError("'from' must not be later than 'to'")
         limit = parse_limit(variables.get("limit"))
@@ -570,11 +604,7 @@ class SensorThingsProvider(DiscoveryProvider):
             if len(observations) >= limit:
                 truncated = len(observations) > limit or bool(next_link)
                 break
-            if next_link is not None and (
-                not isinstance(next_link, str) or not next_link.startswith(base + "/")
-            ):
-                raise SourceProtocolError("SensorThings pagination left the service root")
-            url = next_link
+            url = None if next_link is None else rebased_next_link(next_link, base)
         observations = observations[:limit]
         observations.reverse()
         body: dict[str, Any] = {
@@ -629,9 +659,15 @@ def thing_document(
             warnings.append("Skipped a Datastream without a usable @iot.id")
             continue
         datastream_name = text(datastream.get("name")) or f"Datastream {datastream_key}"
-        slug = property_slug(datastream_name, thing_name)
+        slug = base_slug = property_slug(datastream_name, thing_name)
         if slug in used:
-            slug = f"{slug}_{re.sub(r'[^A-Za-z0-9]+', '_', datastream_key).strip('_')}"
+            slug = base_slug = (
+                f"{slug}_{re.sub(r'[^A-Za-z0-9]+', '_', datastream_key).strip('_')}".rstrip("_")
+            )
+        counter = 2
+        while slug in used:
+            slug = f"{base_slug}_{counter}"
+            counter += 1
         used.add(slug)
         description_parts = [text(datastream.get("description"))]
         if unit := _unit(datastream):
@@ -640,7 +676,7 @@ def thing_document(
             description_parts.append(f"Observed period: {period}.")
         description = " ".join(part.strip() for part in description_parts if part.strip())
         observation = _observation_schema(datastream)
-        observations_path = f"/Datastreams({datastream_key})/Observations"
+        observations_path = f"/Datastreams({key_segment(datastream_key)})/Observations"
 
         if direct_reads:
             latest_query = query_string(
@@ -694,7 +730,7 @@ def thing_document(
                 "to": {
                     "type": "string",
                     "format": "date-time",
-                    "description": "Latest observation time, inclusive",
+                    "description": "Latest observation time, inclusive; a date means its end",
                 },
                 "limit": {
                     "type": "integer",
@@ -768,7 +804,7 @@ def thing_document(
         "securityDefinitions": {"nosec_sc": {"scheme": "nosec"}},
         "links": [
             {
-                "href": f"{base}/Things({key})",
+                "href": f"{base}/Things({key_segment(key)})",
                 "rel": "alternate",
                 "type": "application/json",
             }
