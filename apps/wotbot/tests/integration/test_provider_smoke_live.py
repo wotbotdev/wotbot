@@ -75,6 +75,12 @@ CASES = [
         expect_download_actions=True,
     ),
     Case(
+        provider="sensorthings",
+        url="https://iot.hamburg.de/",
+        queries=("Verkehrszählstelle", ""),
+        expect_http_actions=True,
+    ),
+    Case(
         provider="dcat",
         url="https://opendata.swiss/catalog.rdf",
         queries=("",),

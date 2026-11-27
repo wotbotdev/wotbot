@@ -9,6 +9,7 @@ from wotbot.discovery.providers.public import (
     resolve_private_toolhive_source,
     resolve_public_source,
 )
+from wotbot.discovery.providers.sensorthings import SensorThingsProvider
 from wotbot.discovery.providers.toolhive import ToolHiveProvider
 from wotbot.discovery.providers.tx_bootstrap import TxBootstrapProvider
 from wotbot.discovery.providers.udata import UdataProvider
@@ -25,6 +26,7 @@ PROVIDERS: dict[str, DiscoveryProvider] = {
         TxBootstrapProvider(),
         OpenApiProvider(),
         WotTddProvider(),
+        SensorThingsProvider(),
     )
 }
 
@@ -60,6 +62,7 @@ __all__ = [
     "DiscoveryProvider",
     "EdcV3Provider",
     "OpenApiProvider",
+    "SensorThingsProvider",
     "ToolHiveProvider",
     "TxBootstrapProvider",
     "UdataProvider",
